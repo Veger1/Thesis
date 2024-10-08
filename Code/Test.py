@@ -52,6 +52,7 @@ alpha = ocp.control()
 
 T_sc = ocp.parameter(3, grid='control')
 ocp.set_value(T_sc, test_data_T)  # Set the required torque as input
+print("Length test_data_T", test_data_T.shape)
 
 # Dynamics
 T_rw = R_rwb_pseudo @ T_sc + Null_Rbrw @ alpha
@@ -71,12 +72,14 @@ ocp.set_initial(alpha, 0)  # Unnecessary?
 
 c1 = 1
 c2 = 0.01
+w_res = 30
 
 # Compute the exponential for each component in a vectorized manner
 exp_terms = c1 * exp(-c2 * (w**2))
+exp_terms_res = c1 * exp(-c2 * ((w-w_res)**2))
 
 # Sum the exponential terms
-objective_expr = ocp.integral(sumsqr(exp_terms))  # Zhang includes time
+objective_expr = ocp.integral(sumsqr(exp_terms)+sumsqr(exp_terms_res))  # Zhang includes time
 
 # Add the objective to the OCP
 ocp.add_objective(objective_expr)
@@ -99,6 +102,7 @@ ts, w_sol = sol.sample(w, grid='control')
 _, alpha_sol = sol.sample(alpha, grid='control')
 _, T_rw_sol = sol.sample(T_rw, grid='control')
 rpm_sol = helper.rad_to_rpm(w_sol)
+print("Length of ts", len(ts))
 
 plt.figure()
 plt.axhline(y=6000, color='r', linestyle='--', label=f'rpm=6000')
@@ -118,5 +122,5 @@ plt.ylabel('Torque (Nm)')
 plt.title('Torque vs Time')
 plt.show()
 
-
+print(len(ts))
 
