@@ -1,4 +1,4 @@
-from casadi import sumsqr
+from casadi import sumsqr, sum1, fabs
 from rockit import Ocp, MultipleShooting
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,12 +10,12 @@ test_data_T_full = load_data()  # This is the full test data (8004 samples)
 helper, I_inv, R_rwb_pseudo, Null_Rbrw, Omega_max, Omega_start, T_max = initialize_constants()
 
 # Number of intervals to process (each interval has 101 samples)
-num_intervals = 3
+num_intervals = 16
 scaling = 1.0
 
 # Time vector for each interval (101 points, corresponding to 10 seconds per interval)
-N = 101
-time = 10.0
+N = 500
+time = 50.0
 
 w_initial = Omega_start  # Start with the initial condition
 alpha_initial = 0
@@ -44,12 +44,18 @@ for i in range(num_intervals):
 
     # Set initial conditions
     ocp.subject_to(ocp.at_t0(w) == w_initial)
-    ocp.set_initial(w, w_initial)  # Set initial guess
+    ocp.set_initial(w, 0)  # Set initial guess
 
-    c1, c2 = 1, 0.01   # Define the cost function terms
+    c1, c2 = 10, 0.001   # Define the cost function terms
     exp_terms = c1 * np.exp(-c2 * (w ** 2))  # Compute the exponential cost terms
-    objective_expr = ocp.integral(sumsqr(exp_terms))  # Define the objective function
-    ocp.add_objective(objective_expr)  # Add the objective to the OCP
+    objective_stiction = ocp.integral(sum1(exp_terms))  # Define the objective function
+    ocp.add_objective(objective_stiction)  # Add the objective to the OCP
+
+    s1, s2 = -1, 0.001
+    w_ref = 104
+    exp_terms_ref = s1 * np.exp(-s2 * ((fabs(w) - w_ref) ** 2))
+    objective_reference = ocp.integral(sum1(exp_terms_ref))
+    ocp.add_objective(objective_reference)
 
     ocp.solver('ipopt')  # Use IPOPT solver
     ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
@@ -76,13 +82,26 @@ all_w_sol = np.concatenate(all_w_sol)
 all_alpha_sol = np.concatenate(all_alpha_sol)
 all_T_sol = np.concatenate(all_T_sol)
 
-
 # Plot RPM vs Time
-plt.figure()
-plt.axhline(y=6000, color='r', linestyle='--', label=f'rpm=6000')
-plt.axhline(y=-6000, color='r', linestyle='--', label=f'rpm=-6000')
-plt.axhline(y=0, color='r', linestyle='--', label=f'rpm=0')
-plt.plot(all_t, helper.rad_to_rpm(all_w_sol), '-')
+fig, ax1 = plt.subplots()
+ax1.axhline(y=6000, color='r', linestyle='--', label=f'rpm=6000')
+ax1.axhline(y=-6000, color='r', linestyle='--', label=f'rpm=-6000')
+ax1.axhline(y=0, color='r', linestyle='--', label=f'rpm=0')
+ax1.plot(all_t, helper.rad_to_rpm(all_w_sol[:,1]), 'g-')
+ax1.plot(all_t, helper.rad_to_rpm(all_w_sol[:,3]), 'g--')
+ax1.set_xlabel('X-axis')
+ax1.set_ylabel('RPM', color='g')
+ax1.tick_params(axis='y', labelcolor='g')
+
+ax2 = ax1.twinx()
+ax2.plot(all_t, helper.rad_to_rpm(all_w_sol[:,0]), 'b-')
+ax2.plot(all_t, helper.rad_to_rpm(all_w_sol[:,2]), 'b--')
+ax2.set_ylabel('RPM', color='b')
+ax2.tick_params(axis='y', labelcolor='b')
+ax2.invert_yaxis()
+ax1.set_ylim(-6000, 6000)
+ax2.set_ylim(6000, -6000)
+
 plt.xlabel('Time (s)')
 plt.ylabel('RPM')
 plt.title('RPM vs Time')
@@ -98,16 +117,21 @@ plt.title('Torque vs Time')
 
 # Plot Alpha vs Time
 plt.figure()
-plt.axhline(y=T_max, color='r', linestyle='--', label=f'T_max')
-plt.axhline(y=-T_max, color='r', linestyle='--', label=f'-T_max')
-plt.plot(all_t, all_alpha_sol, 'o-')
+plt.plot(all_t, all_alpha_sol, '-')
 # plt.stairs(all_alpha_sol)
 plt.xlabel('Time (s)')
 plt.ylabel('Alpha')
 plt.title('Alpha vs Time')
 
-plt.figure()
-plt.plot(all_t)
-
 plt.show()
+
+data_to_save = {
+    'all_t': all_t,
+    'all_w_sol': all_w_sol,
+    'all_alpha_sol': all_alpha_sol,
+    'all_T_sol': all_T_sol
+}
+
+# Save to a .mat file
+savemat('output.mat', data_to_save)
 

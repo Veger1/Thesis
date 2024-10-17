@@ -151,5 +151,5 @@ data_dict = {
 }
 
 # Save the data to a .mat file
-savemat('my_data.mat', data_dict)
+savemat('../Code/my_data.mat', data_dict)
 
