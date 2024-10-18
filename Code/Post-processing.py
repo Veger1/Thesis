@@ -3,7 +3,7 @@ from scipy.io import loadmat
 from init_helper import load_data, initialize_constants
 
 # Load the .mat file
-loaded_data = loadmat('stiction.mat')
+loaded_data = loadmat('Data/reference.mat')
 
 # Extract variables
 all_t = loaded_data['all_t'].transpose()
@@ -55,7 +55,16 @@ plt.xlabel('Time (s)')
 plt.ylabel('Alpha')
 plt.title('Alpha vs Time')
 
+plt.figure()
+plt.axhline(y=6000, color='r', linestyle='--', label=f'rpm=6000')
+plt.axhline(y=-6000, color='r', linestyle='--', label=f'rpm=-6000')
+plt.axhline(y=0, color='r', linestyle='--', label=f'rpm=0')
+plt.plot(all_t, helper.rad_to_rpm(all_w_sol), 'o-')
+
+plt.xlabel('Time (s)')
+plt.ylabel('RPM')
+plt.title('RPM vs Time')
+
 plt.show()
-# ref = R_rwb_pseudo @ test_data_T_full[:, 0:303] + Null_Rbrw @ all_alpha_sol
-# T_sol = all_T_sol.transpose()
+
 

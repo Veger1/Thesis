@@ -1,40 +1,41 @@
-import matplotlib.pyplot as plt
-from casadi import sum1, fabs
+from matplotlib import pyplot as plt
+from scipy.io import loadmat, savemat
+from scipy.integrate import cumulative_trapezoid as cumtrapz
 import numpy as np
-from matplotlib.pyplot import figure
+from init_helper import load_data, initialize_constants
 
-# Sample data
-x = np.linspace(-6000, 6000, 1201)          # Data for the second y-axis
+test_data_T_full = load_data()
+helper, I_inv, R_rwb_pseudo, Null_Rbrw, Omega_max, Omega_start, T_max = initialize_constants()
 
-c1, c2 = 10, 0.0001  # Define the cost function terms
-stiction = c1 * np.exp(-c2 * (x ** 2))  # Compute the exponential cost terms
-s1, s2 = -5, 0.0005
-x_ref = 1000
-reference = s1 * np.exp(-s2 * ((abs(x) - x_ref) ** 2))
+T_rw_sol = R_rwb_pseudo @ test_data_T_full
+ts = np.linspace(0, 800, 8004)
+der_state = I_inv @ T_rw_sol
+w0 = cumtrapz(der_state[0], ts, initial=0)
+w1 = cumtrapz(der_state[1], ts, initial=0)
+w2 = cumtrapz(der_state[2], ts, initial=0)
+w3 = cumtrapz(der_state[3], ts, initial=0)
+w = np.array([w0, w1, w2, w3])
+all_w_sol = w.transpose()+Omega_start.transpose()
 
-# # Create the figure and the primary axis
-# fig, ax1 = plt.subplots()
-#
-# # Plot on the primary axis (y1)
-# ax1.plot(x, stiction, 'g-', label="Stiction")
-# ax1.set_xlabel('Rotation Speed (RPM)')
-# ax1.set_ylabel('Cost', color='g')
-# ax1.tick_params(axis='y', labelcolor='g')
-# # Create a second y-axis (twin the x-axis)
-# ax2 = ax1.twinx()
-# # Plot on the secondary axis (y2) and flip the y-axis
-# ax2.plot(x, reference, 'b-', label="Reference")
-# ax2.set_ylabel('Cost', color='b')
-# ax2.tick_params(axis='y', labelcolor='b')
-# ax2.invert_yaxis()  # Flip the y-axis
-#
-# # Add a title and show the plot
-# plt.title("Two Y-axes with One Flipped")
+limit = helper.rpm_to_rad(300)
+plt.figure()
+plt.axhline(y=limit, color='r', linestyle='--', label=f'rpm=300')
+plt.axhline(y=-limit, color='r', linestyle='--', label=f'rpm=-300')
+plt.axhline(y=0, color='r', linestyle='--', label=f'rpm=0')
+plt.plot(ts,all_w_sol, 'o-')
 
+plt.xlabel('Time (s)')
+plt.ylabel('RPM')
+plt.title('RPM vs Time')
 
-figure()
-plt.plot(x, stiction, 'g-', label="Stiction")
-plt.plot(x, reference, 'b-', label="Reference")
-plt.xlabel('Rotation Speed (RPM)')
-plt.ylabel('Cost')
 plt.show()
+
+data_to_save = {
+    'all_w_sol': all_w_sol,
+    # 'all_t': None,
+    # 'all_alpha_sol': None,
+    # 'all_T_sol': None
+}
+# Save to a .mat file
+savemat('MPI.mat', data_to_save)
+
