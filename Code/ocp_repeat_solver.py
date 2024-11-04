@@ -10,12 +10,12 @@ test_data_T_full = load_data()  # This is the full test data (8004 samples)
 helper, I_inv, R_rwb_pseudo, Null_Rbrw, Omega_max, Omega_start, T_max = initialize_constants()
 
 # Number of intervals to process (each interval has 101 samples)
-num_intervals = 8
+num_intervals = 1
 scaling = 1.0
 
 # Time vector for each interval (101 points, corresponding to 10 seconds per interval)
-N = 1000
-time = 100.0
+N = 500
+time = 50.0
 
 w_initial = Omega_start  # Start with the initial condition
 alpha_initial = 0
@@ -124,7 +124,6 @@ plt.title('Torque vs Time')
 # Plot Alpha vs Time
 plt.figure()
 plt.plot(all_t, all_alpha_sol, '-')
-# plt.stairs(all_alpha_sol)
 plt.xlabel('Time (s)')
 plt.ylabel('Alpha')
 plt.title('Alpha vs Time')
