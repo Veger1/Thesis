@@ -12,3 +12,4 @@ class Helper:
 
     def rad_to_rpm(self, rad):
         return rad * 60 / (2 * np.pi)
+

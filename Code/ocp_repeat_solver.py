@@ -10,12 +10,12 @@ test_data_T_full = load_data()  # This is the full test data (8004 samples)
 helper, I_inv, R_rwb_pseudo, Null_Rbrw, Omega_max, Omega_start, T_max = initialize_constants()
 
 # Number of intervals to process (each interval has 101 samples)
-num_intervals = 16
+num_intervals = 8
 scaling = 1.0
 
 # Time vector for each interval (101 points, corresponding to 10 seconds per interval)
-N = 500
-time = 50.0
+N = 1000
+time = 100.0
 
 w_initial = Omega_start  # Start with the initial condition
 alpha_initial = 0
@@ -44,22 +44,24 @@ for i in range(num_intervals):
 
     # Set initial conditions
     ocp.subject_to(ocp.at_t0(w) == w_initial)
-    ocp.set_initial(w, 0)  # Set initial guess
+    # ocp.set_initial(w, 0)  # Set initial guess
+    ocp.set_initial(w, w_initial)  # Set initial guess
+
 
     c1, c2 = 10, 0.001   # Define the cost function terms
     exp_terms = c1 * np.exp(-c2 * (w ** 2))  # Compute the exponential cost terms
-    objective_stiction = ocp.integral(sum1(exp_terms))  # Define the objective function
+    objective_stiction = ocp.integral(sum1(exp_terms)*ocp.t)  # Define the objective function
     # ocp.add_objective(objective_stiction)  # Add the objective to the OCP
 
     s1, s2 = -1, 0.001
     w_ref = 104
     exp_terms_ref = s1 * np.exp(-s2 * ((fabs(w) - w_ref) ** 2))
-    objective_reference = ocp.integral(sum1(exp_terms_ref))
+    objective_reference = ocp.integral(sum1(exp_terms_ref)*ocp.t)
     ocp.add_objective(objective_reference)
 
     g1 = 0.05
     objective_minimize = ocp.integral(g1*sum1(fabs(w)))
-    ocp.add_objective(-objective_minimize)
+    # ocp.add_objective(-objective_minimize)
 
     ocp.solver('ipopt')  # Use IPOPT solver
     ocp.method(MultipleShooting(N=N, M=1, intg='rk'))

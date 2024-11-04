@@ -12,3 +12,8 @@ Approximate conversion:
     8 x 1000 points = 8 x 100.0 seconds
 Ideal conversion for 4 part slew:
     4 x 2001 points = 4 x 200.0 seconds
+
+
+Omega_square used real-time control allocation. Every step it calculates alpha that results in lowest sum of squares
+of reaction wheel speeds. It essentially removes any  torque/speed that is in the nullspace of the control allocation matrix.
+Offset can be added by adding a constant to alpha after calculation or adding initial conditions which are not in the nullspace.
