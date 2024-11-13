@@ -3,7 +3,7 @@ from scipy.io import loadmat
 from init_helper import load_data, initialize_constants
 
 # Load the .mat file
-loaded_data = loadmat('Data/50s/reference.mat')
+loaded_data = loadmat('Data/50s/stic2.mat')
 
 # Extract variables
 all_t = loaded_data['all_t'].transpose()

@@ -6,7 +6,7 @@ from helper import Helper  # Assuming Helper is defined elsewhere
 
 # Load and initialize data
 def load_data():
-    data = scipy.io.loadmat('Slew1.mat')
+    data = scipy.io.loadmat('Data/Slew1.mat')
     test_data = data['Test']
     test_data_T = test_data.T
     return test_data_T

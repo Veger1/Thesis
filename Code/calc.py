@@ -1,25 +1,28 @@
-from rockit import Ocp
-import numpy as np
-from sympy import symbols, exp, Abs
+from casadi import arctan
+from sympy import symbols, exp, Abs, tanh, atan, pi
 from Code.repeat_solver import solve_ocp, calc_cost
 from scipy.io import savemat
+import tkinter as tk
+from tkinter import messagebox
 
-num_intervals, N = 1, 50
+num_intervals, N = 8, 1000
 scaling, time = 1.0, float(N/10)
 
-ocp = Ocp()
-w = ocp.state(4)
-c1, c2 = 10, 0.001  # Define the cost function terms
-objective = c1 * np.exp(-c2 * (w ** 2))
-
 w = symbols('w') # Use symbolic variable
-cost_expr = c1 * exp(-c2 * (w ** 2))
+k = 1.0
+a = 0.001
+b = 1/700000
+X, Y = -pi*10, pi*10
+tanh_expr = (tanh(k * (w - X))) * 0.5 + (tanh(-k * (w - Y))) * 0.5# Hyperbolic tangent function
+gaus_expr = exp(-a*w**2) # Gaussian function
+speed_expr = b*w**2
+cost_expr = speed_expr + gaus_expr
 
 t_sol, w_sol, alpha_sol, T_sol = 0, 0, 0, 0
 cost, total_cost, cost_graph, omega_axis = 0, 0, 0, 0
 
 try:  # Skip this part if optimization has already been done
-    t_sol, w_sol, alpha_sol, T_sol = solve_ocp(objective, num_intervals, N, time, scaling)
+    t_sol, w_sol, alpha_sol, T_sol = solve_ocp(cost_expr, num_intervals, N, time, scaling)
 except Exception as e1:
     print(f"Error: {e1}")
 
@@ -37,8 +40,12 @@ data_to_save = {
     'total_cost': total_cost,
     'cost_graph': cost_graph,
     'omega_axis': omega_axis,
-    'objective': objective,
-    'cost_expr': cost_expr
+    'cost_expr': str(cost_expr)
 }
 savemat('output.mat', data_to_save)
+
+root = tk.Tk()
+root.withdraw()  # Hide the root window
+messagebox.showinfo("Notification", "Check if exceptions exist.")
+root.destroy()
 

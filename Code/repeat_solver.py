@@ -1,4 +1,4 @@
-from casadi import sumsqr, sum1, fabs
+from casadi import sum1
 from rockit import Ocp, MultipleShooting
 import numpy as np
 from init_helper import load_data, initialize_constants
@@ -38,10 +38,12 @@ def solve_ocp(objective_expr, num_intervals, N, time, scaling):
         ocp.subject_to(ocp.at_t0(w) == w_initial)
         ocp.set_initial(w, w_initial)  # Set initial guess
 
-        c1, c2 = 10, 0.001   # Define the cost function terms
-        exp_terms = c1 * np.exp(-c2 * (w ** 2))  # Compute the exponential cost terms
-        objective_stiction = ocp.integral(sum1(exp_terms)*ocp.t)  # Define the objective function
-        # ocp.add_objective(objective_stiction)  # Add the objective to the OCP
+        w_sym = symbols('w')
+        objective_expr_casadi = lambdify(w_sym, objective_expr, 'numpy')
+        objective_expr_casadi = objective_expr_casadi(w)
+
+        objective = ocp.integral(sum1(objective_expr_casadi))
+        ocp.add_objective(objective)
 
         ocp.solver('ipopt')  # Use IPOPT solver
         ocp.method(MultipleShooting(N=N, M=1, intg='rk'))

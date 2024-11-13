@@ -1,0 +1,41 @@
+stic1: c1, c2 = 10, 0.001
+        cost_expr = c1 * exp(-c2 * (w ** 2))
+stic2: c1, c2 = 10, 0.01
+        cost_expr = c1 * exp(-c2 * (w ** 2))
+stic3: c1, c2 = 10, 0.1  # Verify for 100s
+        cost_expr = c1 * exp(-c2 * (w ** 2))
+stic4: k = 50, X, Y = -pi*10, pi*10  # Hyperbolic tangent function
+        tanh_expr = (1 + tanh(k * (w - X))) * 0.5 + (1 + tanh(-k * (w - Y))) * 0.5 - 1
+stic5: k = 0.1, X, Y = -pi*10, pi*10
+        tanh_expr = (tanh(k * (w - X))) * 0.5 + (tanh(-k * (w - Y))) * 0.5
+stic6: k = 0.1, X, Y = -pi*10, pi*10
+        arctan_expr = (1 / pi) * atan(k * (w - X)) + (1 / pi) * atan(-k * (w - Y)) + 1
+stic7: k = 0.3, X, Y = -pi*10, pi*10
+        tanh_expr = (tanh(k * (w - X))) * 0.5 + (tanh(-k * (w - Y))) * 0.5
+stic8: k = 1, X, Y = -pi*10, pi*10, a = 0.005
+        tanh_expr = (tanh(k * (w - X))) * 0.5 + (tanh(-k * (w - Y))) * 0.5
+       gaus_expr = exp(-a*w**2) # Gaussian function
+stic9: k = 1, X, Y = -pi*10, pi*10, a = 0.001
+        tanh_expr = (tanh(k * (w - X))) * 0.5 + (tanh(-k * (w - Y))) * 0.5
+       gaus_expr = exp(-a*w**2) # Gaussian function
+w_sq: w**2
+w_sq_stic: a = 0.001, b = 1/350000
+        gaus_expr = exp(-a*w**2) # Gaussian function
+        speed_expr = b*w**2
+w_sq_stic2: a = 0.001, b = 1/700000
+        gaus_expr = exp(-a*w**2) # Gaussian function
+        speed_expr = b*w**2
+
+
+Logistic function, numerical instability
+\frac{1}{\left(1+e^{k\left(x-Y\right)}\right)}+\frac{1}{\left(1+e^{-k\left(x-X\right)}\right)}-1
+logistic_expr = 1 / (1 + exp(k * (x - Y))) + 1 / (1 + exp(-k * (x - X))) - 1
+
+Hyperbolic tangent function
+(1+\tanh(k\left(x-X\right)))\cdot0.5+(1+\tanh(-k\left(x-Y\right)))\cdot0.5+1
+tanh_expr = (tanh(k * (w - X))) * 0.5 + (tanh(-k * (w - Y))) * 0.5
+
+Arctangent function, infeasible solution, minimizes too slowly
+\frac{1}{\pi}\arctan\left(k\left(x-X\right)\right)+\frac{1}{\pi}\arctan\left(-k\left(x-Y\right)\right)+1
+arctan_expr = (1 / pi) * atan(k * (w - X)) + (1 / pi) * atan(-k * (w - Y)) + 1
+
