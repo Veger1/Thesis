@@ -2,9 +2,6 @@ from scipy.interpolate import interp1d
 from scipy.io import loadmat
 import numpy as np
 import os
-
-# from scipy.special import result
-
 from helper import Helper
 helper = Helper()
 
@@ -99,6 +96,25 @@ def omega_squared_avg(dataset):
     sqrd_avg = sqrd_sum / N
     return sqrd_avg
 
+def power(dataset):
+    data = loadmat(dataset)
+    omega, torque = data['all_w_sol'], data['all_T_sol']
+    time = data['all_t'].flatten()
+    t = time[2] - time[1]
+    power = np.zeros(4)
+    for i in range(len(time)):
+        for j in range(4):
+            pwr = omega[i, j] * torque[i, j]
+            if pwr > 0:
+                power[j] += pwr
+    return power
+
+def sum_elements(function):
+    def wrapper(*args, **kwargs):
+        result = function(*args, **kwargs)
+        return np.sum(result)
+    return wrapper
+
 def repeat_function(func, directory):
     filenames = []
     results = []
@@ -115,5 +131,4 @@ def repeat_function(func, directory):
 
 filenames, results = repeat_function(time_stiction, 'Data/100s')
 print(filenames),print(results)
-
 

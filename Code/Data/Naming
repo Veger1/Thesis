@@ -25,6 +25,15 @@ w_sq_stic: a = 0.001, b = 1/350000
 w_sq_stic2: a = 0.001, b = 1/700000
         gaus_expr = exp(-a*w**2) # Gaussian function
         speed_expr = b*w**2
+w_sq_stic3: a = 0.001, b = 1/7000000
+        gaus_expr = exp(-a*w**2) # Gaussian function
+        speed_expr = b*w**2
+w_sq_stic4: k = 1, X, Y = -pi*10, pi*10, b = 1/7000000
+        tanh_expr = (tanh(k * (w - X))) * 0.5 + (tanh(-k * (w - Y))) * 0.5
+        speed_expr = b*w**2
+w_stic: a = 0.001, b = 1/700000
+        gaus_expr = exp(-a*w**2) # Gaussian function
+        lin_expr = w**2   # Should have absolute value
 
 
 Logistic function, numerical instability

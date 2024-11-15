@@ -11,12 +11,13 @@ scaling, time = 1.0, float(N/10)
 w = symbols('w') # Use symbolic variable
 k = 1.0
 a = 0.001
-b = 1/700000
+b = 1/7000000
 X, Y = -pi*10, pi*10
 tanh_expr = (tanh(k * (w - X))) * 0.5 + (tanh(-k * (w - Y))) * 0.5# Hyperbolic tangent function
 gaus_expr = exp(-a*w**2) # Gaussian function
 speed_expr = b*w**2
-cost_expr = speed_expr + gaus_expr
+lin_expr = b*w
+cost_expr = speed_expr + tanh_expr
 
 t_sol, w_sol, alpha_sol, T_sol = 0, 0, 0, 0
 cost, total_cost, cost_graph, omega_axis = 0, 0, 0, 0
