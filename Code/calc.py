@@ -43,7 +43,7 @@ data_to_save = {
     'omega_axis': omega_axis,
     'cost_expr': str(cost_expr)
 }
-savemat('output.mat', data_to_save)
+savemat('Data/output.mat', data_to_save)
 
 root = tk.Tk()
 root.withdraw()  # Hide the root window
