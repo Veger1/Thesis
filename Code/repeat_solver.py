@@ -88,6 +88,8 @@ def unconstrained_solve_ocp(objective_expr, num_intervals, N, time, scaling):
         w = ocp.state(4)  # 4 states for angular velocities
         alpha = ocp.control()  # control input (acceleration)
         T_sc = ocp.parameter(3, grid='control')  # Set torque as a parameter (3 torques, using 'control' grid)
+        s1 = ocp.variable(4, grid='control')
+        s2 = ocp.variable(4, grid='control')
 
         test_data_T = test_data_T_full[:, i*N:(i+1)*N ]  # Extract N points from data
         ocp.set_value(T_sc, test_data_T)  # Assign the torque constraint
@@ -96,8 +98,21 @@ def unconstrained_solve_ocp(objective_expr, num_intervals, N, time, scaling):
         der_state = I_inv @ T_rw
         ocp.set_der(w, der_state)
 
-        ocp.subject_to(-T_max <= (T_rw <= T_max))
-        ocp.subject_to(-Omega_max <= (w <= Omega_max))
+        ocp.subject_to(-Omega_max <= (w <= Omega_max))  # Add saturation constraints
+        ocp.subject_to(0 <= s1)
+        ocp.subject_to(0 <= s2)
+
+        c1, c2 = T_rw - T_max, -T_rw - T_max
+        lambda1 = 10000000
+        mu1 = 100000
+
+        # torque_constraint_expr = np.exp(T_rw+T_max) + np.exp(-T_rw+T_max)
+        # speed_constraint_expr = np.exp(w+Omega_max) + np.exp(-w+Omega_max)
+        # torque_constraint_expr = np.log(1+np.exp(T_rw-T_max)) + np.log(1+np.exp(-T_rw-T_max))
+        # speed_constraint_expr = np.log(1+np.exp(w-Omega_max)) + np.log(1+np.exp(-w-Omega_max))
+        torque_constraint_expr = lambda1*(c1+s1) + mu1/2*(c1+s1)**2 + lambda1*(c2+s2) + mu1/2*(c2+s2)**2
+        ocp.add_objective(ocp.integral(sum1(torque_constraint_expr)))
+        # ocp.add_objective(ocp.integral(sum1(speed_constraint_expr)))
 
         # Set initial conditions
         ocp.subject_to(ocp.at_t0(w) == w_initial)
@@ -148,3 +163,36 @@ def calc_cost(w_sol,cost_expr):
     total_cost = np.array(total_cost, dtype=float)
 
     return cost, total_cost, cost_graph, omega_axis
+
+def MPC(data, N, time, objective_expr, R_rwb_pseudo, Null_Rbrw, I_inv, Omega_max, T_max, scaling, w_initial):
+    ocp = Ocp(T=time)
+    w = ocp.state(4)  # 4 states for angular velocities
+    alpha = ocp.control()  # control input (acceleration)
+    T_sc = ocp.parameter(3, grid='control')  # Set torque as a parameter (3 torques, using 'control' grid)
+
+    ocp.set_value(T_sc, data)  # Assign the torque constraint
+
+    T_rw = R_rwb_pseudo @ T_sc + Null_Rbrw * scaling @ alpha
+    der_state = I_inv @ T_rw
+    ocp.set_der(w, der_state)
+
+    ocp.subject_to(-T_max <= (T_rw <= T_max))  # Add torque constraints
+    ocp.subject_to(-Omega_max <= (w <= Omega_max))  # Add saturation constraints
+
+    # Set initial conditions
+    ocp.subject_to(ocp.at_t0(w) == w_initial)
+    ocp.set_initial(w, w_initial)  # Set initial guess
+
+    w_sym = symbols('w')
+    objective_expr_casadi = lambdify(w_sym, objective_expr, 'numpy')
+    objective_expr_casadi = objective_expr_casadi(w)
+
+    objective = ocp.integral(sum1(objective_expr_casadi))
+    ocp.add_objective(objective)
+
+    ocp.solver('ipopt')  # Use IPOPT solver
+    ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
+
+    sol = ocp.solve()  # Solve the problem
+    _, alpha_sol = sol.sample(alpha, grid='control')
+    return alpha_sol[0]

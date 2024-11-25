@@ -34,10 +34,11 @@ line3, = ax.plot(x, y3, label="Logistic")
 
 # Set up plot limits and labels
 ax.set_ylim(-0.1, 1.1)
-ax.set_xlabel("x")
-ax.set_ylabel("y")
+ax.set_xlabel("Angular Velocity (rad/s)")
+ax.set_ylabel("Cost")
 axvline(X, color='r', linestyle='--')
 axvline(Y, color='r', linestyle='--')
+
 ax.legend()
 
 # Create slider axis and the slider

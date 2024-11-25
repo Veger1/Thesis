@@ -129,6 +129,7 @@ def repeat_function(func, directory):
     return filenames_array, results_array
 
 
-filenames, results = repeat_function(time_stiction, 'Data/100s')
-print(filenames),print(results)
-
+# filenames, results = repeat_function(time_stiction, 'Data/100s')
+# print(filenames),print(results)
+print(sum(time_stiction('Data/100s/w_sq_stic.mat')))
+print(sum(omega_squared_avg('Data/100s/w_sq_stic.mat')))

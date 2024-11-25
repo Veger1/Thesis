@@ -17,23 +17,37 @@ ts = t[1] - t[2]
 
 omega = Omega_start
 # omega = np.array([[100], [100] ,[100], [100]])  # Custom Initial velocity
+print(omega)
 all_alpha = np.zeros((1, len(t)))
 dot_omega_cmd = 0
 all_omega = np.zeros((4, len(t)))
+all_max_torque = np.zeros(len(t))
 
 for i in range(len(t)):
     data = test_data_T[:,i]
     T_pseudo = (R_rwb_pseudo @ data)
-    omega_avg = -1/(4*ts*Irw) * np.dot(omega.reshape(-1),Null_Rbrw.reshape(-1))
-    command_avg = -1/4*np.dot(T_pseudo.reshape(-1),Null_Rbrw.reshape(-1))
-    alpha = omega_avg - command_avg
+    omega_k = (omega*Irw/ts).flatten()
+    T_virtual = T_pseudo + omega_k
+    alpha = -1/4*np.dot(T_virtual, Null_Rbrw.flatten())
+
 
     all_alpha[0, i] = alpha
-    all_omega[:, i] = omega.reshape(-1)
+    all_omega[:, i] = omega.flatten()
 
-    T_rw = R_rwb_pseudo @ data + Null_Rbrw.reshape(-1) * alpha
+    T_pseudo = (R_rwb_pseudo @ data)
+    T_rw = R_rwb_pseudo @ data + Null_Rbrw.flatten() * alpha
+    all_max_torque[i] = max(abs(T_rw))
+    if max(abs(T_rw)) > T_max:
+        pos = max(T_pseudo[0],T_pseudo[2])
+        neg = max(T_pseudo[1],T_pseudo[3])
+        # x + pos
+        # -x + neg
     omega_dot = T_rw / Irw
     omega = omega.reshape(-1) + ts * omega_dot
+
+    """
+    Can give very large torques if large nullsapce omega is present. Add code to prevent this.
+    """
 
 # plot results
 plt.figure()
@@ -42,4 +56,10 @@ for i in range(all_omega.shape[0]):
 plt.xlabel('Time (s)')
 plt.ylabel('Omega')
 plt.legend()
+
+plt.figure()
+plt.plot(t, all_alpha.flatten())
+
+plt.figure()
+plt.plot(t, all_max_torque)
 plt.show()
