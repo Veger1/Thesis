@@ -18,7 +18,6 @@ def solve_ocp(objective_expr, num_intervals, N, time, scaling):
 
     for i in range(num_intervals):
         ocp = Ocp(t0=time*i, T=time)  # Create the OCP for the current interval
-
         w = ocp.state(4)  # 4 states for angular velocities
         alpha = ocp.control()  # control input (acceleration)
         T_sc = ocp.parameter(3, grid='control')  # Set torque as a parameter (3 torques, using 'control' grid)
@@ -46,7 +45,6 @@ def solve_ocp(objective_expr, num_intervals, N, time, scaling):
 
         ocp.solver('ipopt')  # Use IPOPT solver
         ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
-
         sol = ocp.solve()  # Solve the problem
 
         # Post-processing: Sample solutions for this interval
@@ -70,6 +68,69 @@ def solve_ocp(objective_expr, num_intervals, N, time, scaling):
     all_T_sol = np.concatenate(all_T_sol)
 
     return all_t, all_w_sol, all_alpha_sol, all_T_sol
+
+def fast_solve_ocp(objective_expr, num_intervals, N, time, scaling):
+    test_data_T_full = load_data()
+    helper, I_inv, R_rwb_pseudo, Null_Rbrw, Omega_max, Omega_start, T_max = initialize_constants()
+    w_initial = Omega_start
+
+    ocp = Ocp(t0=0, T=time)
+    w = ocp.state(4)
+    alpha = ocp.control()
+    T_sc = ocp.parameter(3, grid='control')
+    test_data_T = test_data_T_full[:, :N]
+    ocp.set_value(T_sc, test_data_T)  # Assign the torque constraint, to_function does not work if this is not done
+
+    T_rw = R_rwb_pseudo @ T_sc + Null_Rbrw * scaling @ alpha
+    der_state = I_inv @ T_rw
+    ocp.set_der(w, der_state)
+
+    ocp.subject_to(-T_max <= (T_rw <= T_max))  # Add torque constraints
+    ocp.subject_to(-Omega_max <= (w <= Omega_max))  # Add saturation constraints
+
+    ocp.subject_to(ocp.at_t0(w) == w_initial)
+    # ocp.set_initial(w, w_initial)  # Set initial guess
+
+    w_sym = symbols('w')
+    objective_expr_casadi = lambdify(w_sym, objective_expr, 'numpy')
+    objective_expr_casadi = objective_expr_casadi(w)
+    objective = ocp.integral(sum1(objective_expr_casadi))
+    ocp.add_objective(objective)
+
+    ocp.solver('ipopt')  # Use IPOPT solver
+    ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
+
+    prob_solve = ocp.to_function('prob_solve',
+                                 [ ocp.sample(w, grid='control')[1]],
+                                 [ocp.sample(w,grid='control')[1],
+                                        ocp.sample(alpha,grid='control')[1],
+                                        ocp.sample(T_rw,grid='control')[1]],
+                                 ["w_init"], # Or ["w_init", "T_sc"]?
+                                 ["w_sol","alpha_sol","torque_sol"])
+
+    all_t = np.linspace(0, time*num_intervals, N*num_intervals)
+    all_w_sol = []
+    all_alpha_sol = []
+    all_torque_sol = []
+
+    for i in range(num_intervals):
+        test_data_T = test_data_T_full[:, i*N:(i+1)*N]
+        ocp.set_value(T_sc, test_data_T) # This does nothing apparently
+        # sol = prob_solve(w_init = w_initial, T_sc = test_data_T) # How to specify input in to_function?
+        sol = prob_solve(w_init = w_initial)
+        w_sol, alpha_sol, torque_sol = sol['w_sol'], sol['alpha_sol'], sol['torque_sol']
+        w_initial = w_sol[-1]
+
+        all_w_sol.append(w_sol[:,:-1])
+        all_alpha_sol.append(alpha_sol[:,:-1])
+        all_torque_sol.append(torque_sol[:,:-1])
+
+    all_w_sol = np.concatenate(all_w_sol, axis=1).transpose()
+    all_alpha_sol = np.concatenate(all_alpha_sol, axis=1)
+    all_torque_sol = np.concatenate(all_torque_sol, axis=1).transpose()
+
+    return all_t, all_w_sol, all_alpha_sol, all_torque_sol
+
 
 def unconstrained_solve_ocp(objective_expr, num_intervals, N, time, scaling):
     test_data_T_full = load_data()  # This is the full test data (8004 samples)
@@ -97,6 +158,9 @@ def unconstrained_solve_ocp(objective_expr, num_intervals, N, time, scaling):
         T_rw = R_rwb_pseudo @ T_sc + Null_Rbrw * scaling @ alpha
         der_state = I_inv @ T_rw
         ocp.set_der(w, der_state)
+        # ocp.set_der(a, j)
+        # jerk_min, jerk_max = -0.005 , 0.005
+        # ocp.subject_to(jerk_min <= (j <= jerk_max))
 
         ocp.subject_to(-Omega_max <= (w <= Omega_max))  # Add saturation constraints
         ocp.subject_to(0 <= s1)

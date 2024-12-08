@@ -1,11 +1,11 @@
 from casadi import arctan
 from sympy import symbols, exp, Abs, tanh, atan, pi
-from Code.repeat_solver import solve_ocp, calc_cost, unconstrained_solve_ocp
+from Code.repeat_solver import solve_ocp, calc_cost, unconstrained_solve_ocp, fast_solve_ocp
 from scipy.io import savemat
-import tkinter as tk
-from tkinter import messagebox
+# import tkinter as tk
+# from tkinter import messagebox
 
-num_intervals, N = 16, 500
+num_intervals, N = 2, 200
 scaling, time = 1.0, float(N/10)
 
 w = symbols('w') # Use symbolic variable
@@ -23,7 +23,7 @@ t_sol, w_sol, alpha_sol, T_sol = 0, 0, 0, 0
 cost, total_cost, cost_graph, omega_axis = 0, 0, 0, 0
 
 try:  # Skip this part if optimization has already been done
-    t_sol, w_sol, alpha_sol, T_sol = unconstrained_solve_ocp(cost_expr, num_intervals, N, time, scaling)
+    t_sol, w_sol, alpha_sol, T_sol = fast_solve_ocp(cost_expr, num_intervals, N, time, scaling)
 except Exception as e1:
     print(f"Error: {e1}")
 
@@ -45,8 +45,8 @@ data_to_save = {
 }
 savemat('Data/output.mat', data_to_save)
 
-root = tk.Tk()
-root.withdraw()  # Hide the root window
-messagebox.showinfo("Notification", "Check if exceptions exist.")
-root.destroy()
+# root = tk.Tk()
+# root.withdraw()  # Hide the root window
+# messagebox.showinfo("Notification", "Check if exceptions exist.")
+# root.destroy()
 
