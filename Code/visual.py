@@ -4,8 +4,6 @@ import numpy as np
 from matplotlib.animation import FuncAnimation, writers
 from helper import Helper
 
-# loaded_data = loadmat('Data/100s/w_sq_stic2.mat')
-
 helper = Helper()
 
 def load_data(dataset):  # Improve by doing the flattening/transposing here, this function
@@ -168,8 +166,11 @@ def plot_MPI():
     plt.legend([r'$\omega$1', r'$\omega$2', r'$\omega$3', r'$\omega$4'])
     plt.show()
 
-def plot_input():
-    slew_data = loadmat('Data/Slew1.mat')
+def plot_input(slew=1):
+    if slew == 1:
+        slew_data = loadmat('Data/Slew1.mat')
+    else:
+        slew_data = loadmat('Data/Slew2.mat')
     test_data = slew_data['Test']
     plt.plot(test_data)
     plt.xlabel('Time (s)')
@@ -178,13 +179,36 @@ def plot_input():
     plt.legend(["Tx", "Ty", "Tz"])
     plt.show()
 
+def plot_a(data):
+    all_a_sol = data['all_a_sol'].transpose()
+    all_t = data['all_t'].flatten()
+    plt.plot(all_t, all_a_sol)
+    plt.xlabel('Time (s)')
+    plt.ylabel('a')
+    plt.title('a vs Time')
+    plt.show()
 
+def plot_difference(data1,data2):
+    all_w_sol1 = data1['all_w_sol']
+    all_w_sol2 = data2['all_w_sol']
+    all_t = data1['all_t'].flatten()
+    plt.plot(all_t, all_w_sol1-all_w_sol2)
+    plt.xlabel('Time (s)')
+    plt.ylabel('Difference')
+    plt.title('Difference vs Time')
+    plt.show()
 
 
 data = loadmat('Data/output.mat')
+
 # plot_cost_function(data)
 # plot_cost_time(data)
-live_cost_plot(data)
+# live_cost_plot(data)
 # plot_radians(data)
-plot_rpm(data)
-plot_torque(data)
+# plot_rpm(data)
+# plot_torque(data)
+# plot_a(data)
+# plot_input()
+plot_difference(loadmat('Data/slow1.mat'),loadmat('Data/fast1.mat'))
+
+

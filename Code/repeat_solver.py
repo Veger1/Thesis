@@ -4,7 +4,6 @@ import numpy as np
 from init_helper import load_data, initialize_constants
 from sympy import symbols, lambdify
 
-
 def solve_ocp(objective_expr, num_intervals, N, time, scaling):
     test_data_T_full = load_data()  # This is the full test data (8004 samples)
     helper, I_inv, R_rwb_pseudo, Null_Rbrw, Omega_max, Omega_start, T_max = initialize_constants()
@@ -31,15 +30,17 @@ def solve_ocp(objective_expr, num_intervals, N, time, scaling):
 
         ocp.subject_to(-T_max <= (T_rw <= T_max))  # Add torque constraints
         ocp.subject_to(-Omega_max <= (w <= Omega_max))  # Add saturation constraints
-
         # Set initial conditions
-        ocp.subject_to(ocp.at_t0(w) == w_initial)
+        ocp.subject_to(ocp.at_t0(w) == 0)
         ocp.set_initial(w, w_initial)  # Set initial guess
+
+        # a = 0.001
+        # b = 1/7000000
+        # objective_expr_casadi = np.exp(-a * w ** 2) + (b*w ** 2) * (8 / (1 + np.exp(-0.3 * (ocp.t - 60))))
 
         w_sym = symbols('w')
         objective_expr_casadi = lambdify(w_sym, objective_expr, 'numpy')
         objective_expr_casadi = objective_expr_casadi(w)
-
         objective = ocp.integral(sum1(objective_expr_casadi))
         ocp.add_objective(objective)
 
@@ -51,15 +52,12 @@ def solve_ocp(objective_expr, num_intervals, N, time, scaling):
         ts, w_sol = sol.sample(w, grid='control')
         _, alpha_sol = sol.sample(alpha, grid='control')
         _, T_rw_sol = sol.sample(T_rw, grid='control')
-
-        # Update the initial condition for the next interval
         w_initial = w_sol[-1]  # Last value of the current interval
 
         all_t.append(ts[:-1])
         all_w_sol.append(w_sol[:-1])  # Last value is unique
         all_alpha_sol.append(alpha_sol[:-1])
         all_T_sol.append(T_rw_sol[:-1])
-
 
     # Concatenate the data along the first axis (if they're all 1D arrays)
     all_t = np.concatenate(all_t)
@@ -78,6 +76,8 @@ def fast_solve_ocp(objective_expr, num_intervals, N, time, scaling):
     w = ocp.state(4)
     alpha = ocp.control()
     T_sc = ocp.parameter(3, grid='control')
+    w0 = ocp.parameter(4)
+    ocp.set_value(w0, w_initial)
     test_data_T = test_data_T_full[:, :N]
     ocp.set_value(T_sc, test_data_T)  # Assign the torque constraint, to_function does not work if this is not done
 
@@ -88,8 +88,9 @@ def fast_solve_ocp(objective_expr, num_intervals, N, time, scaling):
     ocp.subject_to(-T_max <= (T_rw <= T_max))  # Add torque constraints
     ocp.subject_to(-Omega_max <= (w <= Omega_max))  # Add saturation constraints
 
-    ocp.subject_to(ocp.at_t0(w) == w_initial)
-    # ocp.set_initial(w, w_initial)  # Set initial guess
+    ocp.subject_to(ocp.at_t0(w) == 0)
+    ocp.set_initial(w, w0)
+    ocp.set_initial(alpha, 0)
 
     w_sym = symbols('w')
     objective_expr_casadi = lambdify(w_sym, objective_expr, 'numpy')
@@ -100,27 +101,29 @@ def fast_solve_ocp(objective_expr, num_intervals, N, time, scaling):
     ocp.solver('ipopt')  # Use IPOPT solver
     ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
 
+    states = ocp.sample(w, grid='control')[1]
+    states2 = ocp.sample(w, grid='control-')[1]
+    controls = ocp.sample(alpha, grid='control')[1]
+    constraint = ocp.sample(T_sc, grid='control-')[1]
+    torque = ocp.sample(T_rw, grid='control')[1]
+    torque_input = ocp.sample(T_sc, grid='control')[1]
+    torque_input2 = ocp.sample(T_sc, grid='control-')[1]
+
     prob_solve = ocp.to_function('prob_solve',
-                                 [ ocp.sample(w, grid='control')[1]],
-                                 [ocp.sample(w,grid='control')[1],
-                                        ocp.sample(alpha,grid='control')[1],
-                                        ocp.sample(T_rw,grid='control')[1]],
-                                 ["w_init"], # Or ["w_init", "T_sc"]?
-                                 ["w_sol","alpha_sol","torque_sol"])
+                                 [w0, constraint],
+                                 [states, states2, controls, torque, torque_input, torque_input2],
+                                 ["w_init","torque_in"],
+                                 ["w_sol","w_sol2","alpha_sol","torque_sol","input_torque","input_torque2"])
 
     all_t = np.linspace(0, time*num_intervals, N*num_intervals)
     all_w_sol = []
     all_alpha_sol = []
     all_torque_sol = []
-
     for i in range(num_intervals):
         test_data_T = test_data_T_full[:, i*N:(i+1)*N]
-        ocp.set_value(T_sc, test_data_T) # This does nothing apparently
-        # sol = prob_solve(w_init = w_initial, T_sc = test_data_T) # How to specify input in to_function?
-        sol = prob_solve(w_init = w_initial)
-        w_sol, alpha_sol, torque_sol = sol['w_sol'], sol['alpha_sol'], sol['torque_sol']
-        w_initial = w_sol[-1]
-
+        sol = prob_solve(w_init=w_initial, torque_in=test_data_T)
+        w_sol, w_sol2, alpha_sol, torque_sol, input_sol, input_sol2 = sol['w_sol'], sol['w_sol2'], sol['alpha_sol'], sol['torque_sol'], sol['input_torque'], sol['input_torque2']
+        w_initial = w_sol[:,-1]
         all_w_sol.append(w_sol[:,:-1])
         all_alpha_sol.append(alpha_sol[:,:-1])
         all_torque_sol.append(torque_sol[:,:-1])

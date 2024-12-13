@@ -5,7 +5,7 @@ from scipy.io import savemat
 # import tkinter as tk
 # from tkinter import messagebox
 
-num_intervals, N = 2, 200
+num_intervals, N = 4, 100
 scaling, time = 1.0, float(N/10)
 
 w = symbols('w') # Use symbolic variable
@@ -17,13 +17,13 @@ tanh_expr = (tanh(k * (w - X))) * 0.5 + (tanh(-k * (w - Y))) * 0.5# Hyperbolic t
 gaus_expr = exp(-a*w**2) # Gaussian function
 speed_expr = b*w**2
 lin_expr = b*w
-cost_expr = speed_expr + gaus_expr
+cost_expr = gaus_expr
 
 t_sol, w_sol, alpha_sol, T_sol = 0, 0, 0, 0
 cost, total_cost, cost_graph, omega_axis = 0, 0, 0, 0
 
 try:  # Skip this part if optimization has already been done
-    t_sol, w_sol, alpha_sol, T_sol = fast_solve_ocp(cost_expr, num_intervals, N, time, scaling)
+    t_sol, w_sol, alpha_sol, T_sol= fast_solve_ocp(cost_expr, num_intervals, N, time, scaling)
 except Exception as e1:
     print(f"Error: {e1}")
 
