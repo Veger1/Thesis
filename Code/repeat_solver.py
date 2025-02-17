@@ -31,20 +31,28 @@ def solve_ocp(objective_expr, num_intervals, N, time, scaling):
         ocp.subject_to(-T_max <= (T_rw <= T_max))  # Add torque constraints
         ocp.subject_to(-Omega_max <= (w <= Omega_max))  # Add saturation constraints
         # Set initial conditions
-        ocp.subject_to(ocp.at_t0(w) == 0)
+        ocp.subject_to(ocp.at_t0(w) == w_initial)
         ocp.set_initial(w, w_initial)  # Set initial guess
 
         # a = 0.001
         # b = 1/7000000
         # objective_expr_casadi = np.exp(-a * w ** 2) + (b*w ** 2) * (8 / (1 + np.exp(-0.3 * (ocp.t - 60))))
-
-        w_sym = symbols('w')
-        objective_expr_casadi = lambdify(w_sym, objective_expr, 'numpy')
-        objective_expr_casadi = objective_expr_casadi(w)
+        ocp_t = ocp.t
+        w_sym, t_sym = symbols('w t')
+        objective_expr_casadi = lambdify((w_sym, t_sym), objective_expr, 'numpy')
+        objective_expr_casadi = objective_expr_casadi(w, ocp_t)
         objective = ocp.integral(sum1(objective_expr_casadi))
         ocp.add_objective(objective)
 
-        ocp.solver('ipopt')  # Use IPOPT solver
+        solver_opts = {
+            "print_time": False,  # Suppress overall solver timing
+            "ipopt": {
+                "print_level": 0,  # Disable IPOPT output
+                "sb": "yes"  # Suppress banner output
+            }
+        }
+
+        ocp.solver('ipopt', solver_opts)  # Use IPOPT solver
         ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
         sol = ocp.solve()  # Solve the problem
 
@@ -210,7 +218,6 @@ def unconstrained_solve_ocp(objective_expr, num_intervals, N, time, scaling):
         all_alpha_sol.append(alpha_sol[:-1])
         all_T_sol.append(T_rw_sol[:-1])
 
-
     # Concatenate the data along the first axis (if they're all 1D arrays)
     all_t = np.concatenate(all_t)
     all_w_sol = np.concatenate(all_w_sol)
@@ -219,14 +226,34 @@ def unconstrained_solve_ocp(objective_expr, num_intervals, N, time, scaling):
 
     return all_t, all_w_sol, all_alpha_sol, all_T_sol
 
-def calc_cost(w_sol,cost_expr):
-    w = symbols('w')
-    cost_func = lambdify(w, cost_expr, 'numpy')
 
-    cost = cost_func(w_sol)
+def calc_cost(w_sol, cost_expr, t_vals=None):
+    w, t = symbols('w t')
+    # Check if the cost expression depends on t
+    if t in cost_expr.free_symbols:
+        if t_vals is None:
+            raise ValueError("t_vals must be provided when cost_expr depends on time.")
+
+        # Convert symbolic expression to numpy function with two arguments (w, t)
+        cost_func = lambdify((w, t), cost_expr, 'numpy')
+
+        # Evaluate cost over w_sol and t_vals
+        cost = np.array([cost_func(w_val, t_vals[i]) for i, w_val in enumerate(w_sol)])
+
+    else:
+        # Convert symbolic expression to numpy function with only w
+        cost_func = lambdify(w, cost_expr, 'numpy')
+        cost = cost_func(w_sol)
+
+    # Generate cost graph over an omega range
     omega_axis = np.linspace(-600, 600, 600)
-    cost_graph = cost_func(omega_axis)
-    total_cost = np.sum(cost, axis=1)
+    if t in cost_expr.free_symbols:
+        cost_graph = np.array([cost_func(omega, t_vals[0]) for omega in omega_axis])  # Use first t value
+    else:
+        cost_graph = cost_func(omega_axis)
+
+    # Compute total cost over all time steps
+    total_cost = np.sum(cost, axis=1) if cost.ndim > 1 else np.sum(cost)
     total_cost = np.array(total_cost, dtype=float)
 
     return cost, total_cost, cost_graph, omega_axis

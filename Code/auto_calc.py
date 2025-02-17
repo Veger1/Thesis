@@ -1,62 +1,105 @@
 from casadi import arctan
 from sympy import symbols, exp, tanh, pi
 from itertools import product
-from Code.repeat_solver import fast_solve_ocp, calc_cost
+from Code.repeat_solver import fast_solve_ocp, calc_cost, solve_ocp
 from scipy.io import savemat
+import signal
+import sys
 
 # Define symbolic variable
-w = symbols('w')
+w, t = symbols('w t')
 
-# Define base cost function components
+# Define base cost function components, keep these basic
 base_costs = {
     "gaussian": lambda a: exp(-a * w ** 2),
     "tanh": lambda k: (tanh(k * (w + pi * 10))) * 0.5 + (tanh(-k * (w - pi * 10))) * 0.5,
     "speed": lambda b: b * w ** 2,
-    "linear": lambda b: b * w
+    "linear": lambda b: b * w,
+    "time_dependent": lambda c: (8 / (1 + exp(-c * (t - 60))))
 }
 
 # Define parameter ranges for variation
 param_ranges = {
     "a": [0.001, 0.002],  # Vary Gaussian decay rate
     "k": [1.0, 2.0],  # Vary tanh steepness
-    "b": [1 / 700000, 1 / 350000]  # Vary speed scaling
+    "b": [1 / 700000, 1 / 350000],  # Vary speed scaling
+    "c": [0.2, 0.3]  # Time-dependent scaling
+}
+params_for_cost = {
+    "gaussian": "a",
+    "tanh": "k",
+    "speed": "b",
+    "linear": "b",
+    "time_dependent": "c"
 }
 
-# Define cost function combinations (sum of selected terms)
+# Define cost function combinations
 cost_combinations = [
-    ["gaussian", "tanh"],
-    ["gaussian", "speed"],
-    ["tanh", "linear"],
-    ["gaussian", "tanh", "speed"]
+    # ["gaussian", "tanh"],
+    # ["gaussian", "speed"],
+    # ["tanh", "linear"],
+    # ["gaussian", "tanh", "speed"],
+    ["gaussian", "time_dependent"]
 ]
 
 # Define optimization parameters
 num_intervals, N = 4, 100
 scaling, time = 1.0, float(N / 10)
 
-# Store results
-results = {}
+# Memory Estimation
+num_points = num_intervals * N
+values_per_point = 10  # 10 numbers stored per point
+bytes_per_value = 4  # Assuming 32-bit (4 bytes per number)
+memory_per_solution = num_points * values_per_point * bytes_per_value  # in bytes
+memory_per_solution_MB = memory_per_solution / (1024 ** 2)  # Convert to MB
 
-# Iterate through cost function combinations
+# Precompute all cost expressions with parameters
+cost_expressions = []
 for cost_names in cost_combinations:
-    # Iterate through all parameter value combinations
-    for params in product(*param_ranges.values()):
-        # Assign parameter values
-        param_dict = dict(zip(param_ranges.keys(), params))
+    param_lists = [param_ranges[params_for_cost[name]] for name in cost_names]  # Get valid parameter lists
 
-        # Construct cost expression by summing selected terms
-        cost_expr = sum(base_costs[name](param_dict[name[0]]) for name in cost_names)
+    for param_values in product(*param_lists):  # Generate all combinations
+        param_dict = {params_for_cost[name]: value for name, value in zip(cost_names, param_values)}
 
-        # Generate a unique name based on cost functions and parameter values
+        # Build cost expression
+        cost_expr = sum(base_costs[name](param_dict[params_for_cost[name]]) for name in cost_names)
+
+        # Create a unique identifier
         param_str = "_".join([f"{k}{v}" for k, v in param_dict.items()])
         cost_name = "_".join(cost_names) + f"_{param_str}"
 
-        print(f"Running optimization for {cost_name}...")
+        cost_expressions.append((cost_name, cost_expr))
 
-        try:
+# Display total combinations and estimated memory usage
+total_combinations = len(cost_expressions)
+total_memory_MB = total_combinations * memory_per_solution_MB
+print(f"Total cost function combinations: {total_combinations}")
+print(f"Estimated memory usage after solving: {total_memory_MB:.2f} MB")
+
+# Storage for results
+results = {}
+completed_solutions = 0
+
+# Function to handle KeyboardInterrupt
+def save_and_exit():
+    global results, completed_solutions
+    print("\nSaving results before exiting...")
+    savemat('Data/all_results_partial.mat', results)  # Save all completed results
+    print(f"✅ {completed_solutions} solutions saved successfully!")
+    sys.exit(0)
+
+
+# Catch Ctrl+C (KeyboardInterrupt)
+signal.signal(signal.SIGINT, lambda signum, frame: save_and_exit())
+
+# Solve optimization for each cost expression
+try:
+    for cost_name, cost_expr in cost_expressions:
+        print(f"Running optimization for {cost_name}...")
+        if True: # replace with try, add exception handling
             # Solve optimization
-            t_sol, w_sol, alpha_sol, T_sol = fast_solve_ocp(cost_expr, num_intervals, N, time, scaling)
-            cost, total_cost, cost_graph, omega_axis = calc_cost(w_sol, cost_expr)
+            t_sol, w_sol, alpha_sol, T_sol = solve_ocp(cost_expr, num_intervals, N, time, scaling)
+            cost, total_cost, cost_graph, omega_axis = calc_cost(w_sol, cost_expr, t_sol)
 
             # Store results
             results[cost_name] = {
@@ -72,10 +115,12 @@ for cost_names in cost_combinations:
             }
 
             # Save results to a separate file
-            savemat(f'Data/output_{cost_name}.mat', results[cost_name])
+            savemat(f'Data/Auto/{cost_name}.mat', results[cost_name])
+            completed_solutions += 1
 
-        except Exception as e:
-            print(f"Error while processing {cost_name}: {e}")
+except KeyboardInterrupt:
+    save_and_exit()  # Save results and exit safely
 
-# Optionally, save all results in one file
-savemat('Data/all_results.mat', results)
+# Final save if loop completes normally
+savemat('Data/Auto/all_results.mat', results)
+print(f"✅ All {completed_solutions} solutions saved successfully!")
