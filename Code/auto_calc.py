@@ -1,5 +1,5 @@
 from casadi import arctan
-from sympy import symbols, exp, tanh, pi
+from sympy import symbols, exp, tanh, pi, Mul
 from itertools import product
 from Code.repeat_solver import fast_solve_ocp, calc_cost, solve_ocp
 from scipy.io import savemat
@@ -15,7 +15,8 @@ base_costs = {
     "tanh": lambda k: (tanh(k * (w + pi * 10))) * 0.5 + (tanh(-k * (w - pi * 10))) * 0.5,
     "speed": lambda b: b * w ** 2,
     "linear": lambda b: b * w,
-    "time_dependent": lambda c: (8 / (1 + exp(-c * (t - 60))))
+    "time_dependent": lambda c: (8 / (1 + exp(-c * (t - 60)))),
+    "time_dep": lambda c: c*t
 }
 
 # Define parameter ranges for variation
@@ -30,7 +31,8 @@ params_for_cost = {
     "tanh": "k",
     "speed": "b",
     "linear": "b",
-    "time_dependent": "c"
+    "time_dependent": "c",
+    "time_dep": "c"
 }
 
 # Define cost function combinations
@@ -39,7 +41,8 @@ cost_combinations = [
     # ["gaussian", "speed"],
     # ["tanh", "linear"],
     # ["gaussian", "tanh", "speed"],
-    ["gaussian", "time_dependent"]
+    # ["gaussian*time_dependent"],
+    ["gaussian", "speed*time_dep"]
 ]
 
 # Define optimization parameters
@@ -56,13 +59,26 @@ memory_per_solution_MB = memory_per_solution / (1024 ** 2)  # Convert to MB
 # Precompute all cost expressions with parameters
 cost_expressions = []
 for cost_names in cost_combinations:
-    param_lists = [param_ranges[params_for_cost[name]] for name in cost_names]  # Get valid parameter lists
+    # Split cost names if multiplication is involved
+    cost_names_split = [name.split('*') for name in cost_names]
+    cost_names_flat = [item for sublist in cost_names_split for item in sublist]
+
+    param_lists = [param_ranges[params_for_cost[name]] for name in cost_names_flat]  # Get valid parameter lists
 
     for param_values in product(*param_lists):  # Generate all combinations
-        param_dict = {params_for_cost[name]: value for name, value in zip(cost_names, param_values)}
+        param_dict = {params_for_cost[name]: value for name, value in zip(cost_names_flat, param_values)}
 
         # Build cost expression
-        cost_expr = sum(base_costs[name](param_dict[params_for_cost[name]]) for name in cost_names)
+        cost_expr = 0  # Initialize to 0 for addition
+        for cost_name in cost_names:
+            if '*' in cost_name:
+                # Handle multiplication
+                components = cost_name.split('*')
+                component_exprs = [base_costs[comp](param_dict[params_for_cost[comp]]) for comp in components]
+                cost_expr += Mul(*component_exprs)  # Add the product to the cost expression
+            else:
+                # Handle addition
+                cost_expr += base_costs[cost_name](param_dict[params_for_cost[cost_name]])
 
         # Create a unique identifier
         param_str = "_".join([f"{k}{v}" for k, v in param_dict.items()])
@@ -80,11 +96,12 @@ print(f"Estimated memory usage after solving: {total_memory_MB:.2f} MB")
 results = {}
 completed_solutions = 0
 
+
 # Function to handle KeyboardInterrupt
 def save_and_exit():
     global results, completed_solutions
     print("\nSaving results before exiting...")
-    savemat('Data/all_results_partial.mat', results)  # Save all completed results
+    savemat('Data/Auto/all_results_partial.mat', results)  # Save all completed results
     print(f"✅ {completed_solutions} solutions saved successfully!")
     sys.exit(0)
 
@@ -96,7 +113,7 @@ signal.signal(signal.SIGINT, lambda signum, frame: save_and_exit())
 try:
     for cost_name, cost_expr in cost_expressions:
         print(f"Running optimization for {cost_name}...")
-        if True: # replace with try, add exception handling
+        if True:  # replace with try, add exception handling
             # Solve optimization
             t_sol, w_sol, alpha_sol, T_sol = solve_ocp(cost_expr, num_intervals, N, time, scaling)
             cost, total_cost, cost_graph, omega_axis = calc_cost(w_sol, cost_expr, t_sol)
@@ -115,7 +132,8 @@ try:
             }
 
             # Save results to a separate file
-            savemat(f'Data/Auto/{cost_name}.mat', results[cost_name])
+            clean_cost_name = cost_name.replace('*', 'X')
+            savemat(f'Data/Auto/{clean_cost_name}.mat', results[cost_name])
             completed_solutions += 1
 
 except KeyboardInterrupt:

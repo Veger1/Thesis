@@ -9,19 +9,20 @@ def solve_ocp(objective_expr, num_intervals, N, time, scaling):
     helper, I_inv, R_rwb_pseudo, Null_Rbrw, Omega_max, Omega_start, T_max = initialize_constants()
 
     w_initial = Omega_start  # Start with the initial condition
+    section_length = 200  # Number of points per section
 
-    all_t = []
-    all_w_sol = []
-    all_alpha_sol = []
-    all_T_sol = []
+    all_t, all_w_sol, all_alpha_sol, all_T_sol = [], [], [], []
 
     for i in range(num_intervals):
-        ocp = Ocp(t0=time*i, T=time)  # Create the OCP for the current interval
+        t0_actual = time * i
+        t0_relative = t0_actual % 200
+        t0_offset = t0_actual//200*200
+        ocp = Ocp(t0=t0_relative, T=time)  # Create the OCP for the current interval
         w = ocp.state(4)  # 4 states for angular velocities
         alpha = ocp.control()  # control input (acceleration)
         T_sc = ocp.parameter(3, grid='control')  # Set torque as a parameter (3 torques, using 'control' grid)
 
-        test_data_T = test_data_T_full[:, i*N:(i+1)*N ]  # Extract N points from data
+        test_data_T = test_data_T_full[:, i*N:(i+1)*N]  # Extract N points from data
         ocp.set_value(T_sc, test_data_T)  # Assign the torque constraint
 
         T_rw = R_rwb_pseudo @ T_sc + Null_Rbrw * scaling @ alpha
@@ -61,6 +62,8 @@ def solve_ocp(objective_expr, num_intervals, N, time, scaling):
         _, alpha_sol = sol.sample(alpha, grid='control')
         _, T_rw_sol = sol.sample(T_rw, grid='control')
         w_initial = w_sol[-1]  # Last value of the current interval
+
+        ts = ts + t0_offset
 
         all_t.append(ts[:-1])
         all_w_sol.append(w_sol[:-1])  # Last value is unique
@@ -238,7 +241,7 @@ def calc_cost(w_sol, cost_expr, t_vals=None):
         cost_func = lambdify((w, t), cost_expr, 'numpy')
 
         # Evaluate cost over w_sol and t_vals
-        cost = np.array([cost_func(w_val, t_vals[i]) for i, w_val in enumerate(w_sol)])
+        cost = np.array([cost_func(w_val, t_vals[i] % 200) for i, w_val in enumerate(w_sol)])
 
     else:
         # Convert symbolic expression to numpy function with only w
@@ -257,36 +260,3 @@ def calc_cost(w_sol, cost_expr, t_vals=None):
     total_cost = np.array(total_cost, dtype=float)
 
     return cost, total_cost, cost_graph, omega_axis
-
-def MPC(data, N, time, objective_expr, R_rwb_pseudo, Null_Rbrw, I_inv, Omega_max, T_max, scaling, w_initial):
-    ocp = Ocp(T=time)
-    w = ocp.state(4)  # 4 states for angular velocities
-    alpha = ocp.control()  # control input (acceleration)
-    T_sc = ocp.parameter(3, grid='control')  # Set torque as a parameter (3 torques, using 'control' grid)
-
-    ocp.set_value(T_sc, data)  # Assign the torque constraint
-
-    T_rw = R_rwb_pseudo @ T_sc + Null_Rbrw * scaling @ alpha
-    der_state = I_inv @ T_rw
-    ocp.set_der(w, der_state)
-
-    ocp.subject_to(-T_max <= (T_rw <= T_max))  # Add torque constraints
-    ocp.subject_to(-Omega_max <= (w <= Omega_max))  # Add saturation constraints
-
-    # Set initial conditions
-    ocp.subject_to(ocp.at_t0(w) == w_initial)
-    ocp.set_initial(w, w_initial)  # Set initial guess
-
-    w_sym = symbols('w')
-    objective_expr_casadi = lambdify(w_sym, objective_expr, 'numpy')
-    objective_expr_casadi = objective_expr_casadi(w)
-
-    objective = ocp.integral(sum1(objective_expr_casadi))
-    ocp.add_objective(objective)
-
-    ocp.solver('ipopt')  # Use IPOPT solver
-    ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
-
-    sol = ocp.solve()  # Solve the problem
-    _, alpha_sol = sol.sample(alpha, grid='control')
-    return alpha_sol[0]

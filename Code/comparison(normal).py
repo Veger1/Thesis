@@ -6,7 +6,7 @@ from init_helper import load_data, initialize_constants
 
 full_data = load_data()
 helper, I_inv, R_pseudo, Null_R, Omega_max, w_initial, T_max = initialize_constants()
-num_intervals, points = 4, 30
+num_intervals, points = 4, 1000
 
 for i in range(num_intervals):
     ocp = Ocp(t0=0, T=points/10)

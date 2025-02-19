@@ -176,7 +176,6 @@ def live_cost_plot(loaded_data, output_file=None):
         cost_func = lambdify(w, cost_expr, 'numpy')
         cost_graph = loaded_data['cost_graph'].flatten()  # Static cost graph
 
-
     # Set up the figure and axes
     fig, (ax, ax_total_cost) = plt.subplots(1, 2, gridspec_kw={'width_ratios': [4, 1]})
     ax.set_ylabel('Cost')
@@ -215,7 +214,7 @@ def live_cost_plot(loaded_data, output_file=None):
 
         # Update cost function dynamically if it depends on time
         if time_dependent:
-            cost_line.set_ydata(cost_graph_func(time[frame]))
+            cost_line.set_ydata(cost_graph_func(time[frame] % 200))
 
         # Update time and total cost display
         time_text.set_text(f'Time: {time[frame]:.2f} s')
@@ -233,6 +232,7 @@ def live_cost_plot(loaded_data, output_file=None):
     # Show the plot
     plt.tight_layout()
     plt.show()
+
 
 def plot_cost_time(loaded_data):
     if 'cost' in loaded_data:
@@ -284,7 +284,7 @@ def plot_input(slew=1):
     # plt.fill([700, 700, 800, 800], [-1, 1, 1, -1], 'r', alpha=0.1)
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
-    plt.grid()
+    # plt.grid()
     plt.show()
 
 
@@ -332,15 +332,15 @@ def plot_input_separate(slew=1):
     plt.show()
 
 
-data = loadmat('Data/Auto/gaussian_time_dependent_a0.002_c0.2.mat')
+data = loadmat('Data/slew1_2periods.mat')
 
-plot_cost_function(data)
+# plot_cost_function(data)
 # plot_cost_time(data)
-live_cost_plot(data)
+# live_cost_plot(data, 'Data/Slew1_cost.mp4')
 plot_radians(data)
 # plot_torque(data)
 # plot_a(data)
-#plot_input(2)
+plot_input(1)
 
 # plot_difference(loadmat('Data/slow1.mat'), loadmat('Data/fast1.mat'))
 
