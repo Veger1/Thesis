@@ -336,11 +336,11 @@ data = loadmat('Data/slew1_2periods.mat')
 
 # plot_cost_function(data)
 # plot_cost_time(data)
-# live_cost_plot(data, 'Data/Slew1_cost.mp4')
-plot_radians(data)
+live_cost_plot(data, 'Data/Slew1_cost.mp4')
+# plot_radians(data)
 # plot_torque(data)
 # plot_a(data)
-plot_input(1)
+# plot_input(1)
 
 # plot_difference(loadmat('Data/slow1.mat'), loadmat('Data/fast1.mat'))
 

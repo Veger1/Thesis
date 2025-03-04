@@ -21,10 +21,10 @@ base_costs = {
 
 # Define parameter ranges for variation
 param_ranges = {
-    "a": [0.001, 0.002],  # Vary Gaussian decay rate
+    "a": [0.1, 0.05, 0.01, 0.005, 0.002, 0.001],  # Vary Gaussian decay rate
     "k": [1.0, 2.0],  # Vary tanh steepness
-    "b": [1 / 700000, 1 / 350000],  # Vary speed scaling
-    "c": [0.2, 0.3]  # Time-dependent scaling
+    "b": [1 / 700000, 1 / 350000, 1 / 200000, 1 / 100000],  # Vary speed scaling
+    "c": [0.5, 1, 2]  # Time-dependent scaling
 }
 params_for_cost = {
     "gaussian": "a",
@@ -46,7 +46,7 @@ cost_combinations = [
 ]
 
 # Define optimization parameters
-num_intervals, N = 4, 100
+num_intervals, N = 16, 500
 scaling, time = 1.0, float(N / 10)
 
 # Memory Estimation

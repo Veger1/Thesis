@@ -1,0 +1,7 @@
+Slew1, gaussian 0.01, path known:
+mpc_execution_times_500_w0.csv: 500 points, set_initial is w_initial (only beginning)
+mpc_execution_times_500.csv: 500 points, set_initial is not set (zero everywhere)
+
+Slew1, gaussian 0.01, path unknown:
+mpc_execution_times_500_w0_live.csv: 500 points, set_initial is w_initial (only beginning)
+mpc_execution_times_500_live.csv: 500 points, set_initial is not set (zero everywhere)
