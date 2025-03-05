@@ -16,7 +16,7 @@ base_costs = {
     "speed": lambda b: b * w ** 2,
     "linear": lambda b: b * w,
     "time_dependent": lambda c: (8 / (1 + exp(-c * (t - 60)))),
-    "time_dep": lambda c: c*t
+    "time_dep": lambda c: (1+tanh(c*(t-60)))/2
 }
 
 # Define parameter ranges for variation
@@ -49,12 +49,13 @@ cost_combinations = [
 num_intervals, N = 16, 500
 scaling, time = 1.0, float(N / 10)
 
-# Memory Estimation
+# Memory Estimation (NEEDS REWORK)
 num_points = num_intervals * N
 values_per_point = 10  # 10 numbers stored per point
 bytes_per_value = 4  # Assuming 32-bit (4 bytes per number)
 memory_per_solution = num_points * values_per_point * bytes_per_value  # in bytes
-memory_per_solution_MB = memory_per_solution / (1024 ** 2)  # Convert to MB
+# memory_per_solution_MB = memory_per_solution / (1024 ** 2)  # Convert to MB
+memory_per_solution_MB = 948.0 / 1024  # Hardcoded value for now
 
 # Precompute all cost expressions with parameters
 cost_expressions = []
