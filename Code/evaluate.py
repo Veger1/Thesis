@@ -1,14 +1,18 @@
+import csv
+import pandas as pd
 from scipy.interpolate import interp1d
 from scipy.io import loadmat
 import numpy as np
 import os
 from helper import Helper
+
 helper = Helper()
 
 # Define Omega thresholds
 Omega_max = helper.rpm_to_rad(300)
 Omega_min = -helper.rpm_to_rad(300)
 Omega_tgt = helper.rpm_to_rad(1000)
+
 
 def time_stiction(dataset):
     data = loadmat(dataset)
@@ -22,6 +26,7 @@ def time_stiction(dataset):
             if abs(omega[i, j]) < Omega_max:
                 stiction_time[j] += t
     return stiction_time
+
 
 def time_stiction_accurate(dataset):
     data = loadmat(dataset)
@@ -56,6 +61,7 @@ def time_stiction_accurate(dataset):
                         stiction_time[j] += time[i+1] - crossing_time
     return stiction_time
 
+
 def highest_omega(dataset):
     data = loadmat(dataset)
     omega, time = data['all_w_sol'], data['all_t'].flatten()
@@ -68,15 +74,18 @@ def highest_omega(dataset):
                 highest_value[j] = omega[i, j]
     return highest_value
 
+
 def time_stiction_percentage(dataset):
     stiction_time = time_stiction(dataset)
     total_time = loadmat(dataset)['all_t'].flatten()[-1]
     return stiction_time / total_time
 
+
 def time_stiction_accurate_percentage(dataset):
     stiction_time = time_stiction_accurate(dataset)
     total_time = loadmat(dataset)['all_t'].flatten()[-1]
     return stiction_time / total_time
+
 
 def omega_squared_sum(dataset):  # Score of 1 signifies average vibration level is that of Omega_max
     data = loadmat(dataset)
@@ -88,6 +97,7 @@ def omega_squared_sum(dataset):  # Score of 1 signifies average vibration level 
             omega_sqrd_sum[j] += (omega[i, j]/Omega_max) ** 2
     return omega_sqrd_sum
 
+
 def omega_squared_avg(dataset):
     sqrd_sum = omega_squared_sum(dataset)
     data = loadmat(dataset)
@@ -95,6 +105,7 @@ def omega_squared_avg(dataset):
     N = len(time)
     sqrd_avg = sqrd_sum / N
     return sqrd_avg
+
 
 def power(dataset):
     data = loadmat(dataset)
@@ -109,11 +120,13 @@ def power(dataset):
                 power[j] += pwr
     return power
 
+
 def sum_elements(function):
     def wrapper(*args, **kwargs):
         result = function(*args, **kwargs)
         return np.sum(result)
     return wrapper
+
 
 def repeat_function(func, directory):
     filenames = []
@@ -129,7 +142,62 @@ def repeat_function(func, directory):
     return filenames_array, results_array
 
 
-# filenames, results = repeat_function(time_stiction, 'Data/100s')
-# print(filenames),print(results)
-print(sum(time_stiction('Data/100s/w_sq_stic.mat')))
-print(sum(omega_squared_avg('Data/100s/w_sq_stic.mat')))
+def save_results_to_csv(functions, directory, output_csv):
+    filenames = None
+    all_results = []
+    headers = ["Filename"]
+
+    for func in functions:
+        func_name = func.__name__
+        headers.extend([f"{func_name}_rw{i + 1}" for i in range(4)])
+        filenames, results = repeat_function(func, directory)
+        all_results.append(results)
+
+    all_results = np.hstack(all_results)  # Combine all results horizontally
+
+    with open(output_csv, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(headers)  # Write headers
+        for i, filename in enumerate(filenames):
+            writer.writerow([filename] + all_results[i].tolist())
+
+    print(f"Results saved to {output_csv}")
+
+
+def save_results_to_excel(functions, directory, output_xlsx):
+    filenames = None
+    all_results = []
+    headers = ["Filename"]
+
+    # Process each function
+    for func in functions:
+        func_name = func.__name__
+        headers.extend([f"{func_name}_rw{i + 1}" for i in range(4)])
+        headers.append(f"{func_name}_sum")  # Sum column
+        filenames, results = repeat_function(func, directory)
+
+        # Compute sum of 4 columns per function
+        sum_results = np.sum(results, axis=1, keepdims=True)  # Sum along row
+
+        # Stack results with sum column
+        results_with_sum = np.hstack([results, sum_results])
+        all_results.append(results_with_sum)
+
+    all_results = np.hstack(all_results)  # Combine all results horizontally
+
+    # Create a DataFrame for Excel output
+    df = pd.DataFrame(np.column_stack([filenames, all_results]), columns=headers)
+
+    # Save to Excel
+    df.to_excel(output_xlsx, index=False, engine='openpyxl')
+
+    print(f"Results saved to {output_xlsx} (Excel format)")
+
+
+# filenames, results = repeat_function(omega_squared_avg, 'Data/Auto/gauss_speedXtime')
+# print(filenames), print(results)
+evaluation_functions = [power, omega_squared_avg, time_stiction, time_stiction_accurate]
+save_results_to_excel(evaluation_functions, 'Data/Auto/gauss_speedXtime_2', 'Data/Auto/gauss_speedXtime_2/results.xlsx')
+
+# print(sum(time_stiction('Data/Auto/gauss_speedXtime/gaussian_speedXtime_dep_a0.1_b1e-05_c1.mat')))
+# print(sum(omega_squared_avg('Data/Auto/gauss_speedXtime/gaussian_speedXtime_dep_a0.1_b1e-05_c1.mat')))
