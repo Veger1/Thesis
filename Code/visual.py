@@ -1,3 +1,5 @@
+import os
+
 from matplotlib import pyplot as plt
 from matplotlib.ticker import ScalarFormatter
 from scipy.io import loadmat, whosmat
@@ -332,15 +334,25 @@ def plot_input_separate(slew=1):
     plt.show()
 
 
-data = loadmat('Data/slew1_2periods.mat')
+def repeat_function(func, directory):
+    for filename in os.listdir(directory):
+        if filename.endswith('.mat'):
+            filepath = os.path.join(directory, filename)
+            data = loadmat(filepath)
+            func(data)
+
+
+# data = loadmat('Data/Auto/gauss_speedXtime/gaussian_speedXtime_dep_a0.1_b1e-05_c1.mat')
 
 # plot_cost_function(data)
 # plot_cost_time(data)
-live_cost_plot(data, 'Data/Slew1_cost.mp4')
+# live_cost_plot(data)
 # plot_radians(data)
 # plot_torque(data)
 # plot_a(data)
-# plot_input(1)
+plot_input(1)
+
+#repeat_function(live_cost_plot, 'Data/Auto/gauss_speedXtime')
 
 # plot_difference(loadmat('Data/slow1.mat'), loadmat('Data/fast1.mat'))
 
