@@ -24,12 +24,14 @@ for i in range(total_points):
     # alpha = calc_alpha(T_sc, w_current)
     T_rw = R_pseudo @ T_sc + Null_R @ alpha
     T_rw = abs(T_rw)
-    if i == 2100:
+    if i % 100 == 0:
         plt.plot(alpha.flatten(), T_rw.T, )
         T_rw = R_pseudo @ T_sc # + Null_R @ alpha
-        plt.plot([0], abs(max(T_rw)), 'ro')
-        plt.plot([0], abs(min(T_rw)), 'ro')
-        plt.plot([0], (abs(max(T_rw))+abs(min(T_rw)))/2, 'ro')
+        alpha_opt = -T_rw / Null_R
+        alpha_best = (max(alpha_opt)+min(alpha_opt))/2
+        plt.axvline(x=alpha_best, color='b', linestyle='--')
+        for j in range(alpha_opt.shape[0]):
+            plt.axvline(x=alpha_opt[j], color='r', linestyle='--')
         plt.show()
 
     T_rw = R_pseudo @ T_sc
