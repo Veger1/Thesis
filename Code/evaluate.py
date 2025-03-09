@@ -1,4 +1,7 @@
 import csv
+import inspect
+import re
+
 import pandas as pd
 from scipy.interpolate import interp1d
 from scipy.io import loadmat
@@ -14,11 +17,14 @@ Omega_min = -helper.rpm_to_rad(300)
 Omega_tgt = helper.rpm_to_rad(1000)
 
 
-def time_stiction(dataset):
+def time_stiction(dataset, limit=None):
     data = loadmat(dataset)
     omega, time = data['all_w_sol'], data['all_t'].flatten()
     N, t = len(time), time[2]-time[1]
     stiction_time = np.zeros(4)
+
+    if limit is not None:
+        Omega_max = helper.rpm_to_rad(limit)
 
     # Count occurrences in stiction zone
     for i in range(N):
@@ -28,12 +34,16 @@ def time_stiction(dataset):
     return stiction_time
 
 
-def time_stiction_accurate(dataset):
+def time_stiction_accurate(dataset, limit=None):
     data = loadmat(dataset)
     omega, time = data['all_w_sol'], data['all_t'].flatten()
     N, t = len(time), time[2]-time[1]
     stiction_time = np.zeros(4)
-    # What if both points are outside stiction zone but the line crosses the zone?
+
+    if limit is not None:
+        Omega_max = helper.rpm_to_rad(limit)
+        Omega_min = -Omega_max
+
     for j in range(4):
         for i in range(N - 1):
             if abs(omega[i, j]) < Omega_max or abs(omega[i + 1, j]) < Omega_max:
@@ -194,10 +204,115 @@ def save_results_to_excel(functions, directory, output_xlsx):
     print(f"Results saved to {output_xlsx} (Excel format)")
 
 
-# filenames, results = repeat_function(omega_squared_avg, 'Data/Auto/gauss_speedXtime')
-# print(filenames), print(results)
-evaluation_functions = [power, omega_squared_avg, time_stiction, time_stiction_accurate]
-save_results_to_excel(evaluation_functions, 'Data/Auto/gauss_speedXtime_2', 'Data/Auto/gauss_speedXtime_2/results.xlsx')
+def extract_filename_info(filename):
+    """
+    Extracts the fixed part of the filename and all parameter values (A, B, C, ...).
 
-# print(sum(time_stiction('Data/Auto/gauss_speedXtime/gaussian_speedXtime_dep_a0.1_b1e-05_c1.mat')))
-# print(sum(omega_squared_avg('Data/Auto/gauss_speedXtime/gaussian_speedXtime_dep_a0.1_b1e-05_c1.mat')))
+    Example filename: gaussian_speedXtime_dep_a0.1_b1.4285714285714286e-06_c0.5.mat
+    Returns:
+        - base_name (constant part): 'gaussian_speedXtime_dep'
+        - extracted_values (dict): {'A': 0.1, 'B': 1.42857e-06, 'C': 0.5}
+    """
+    filename = filename.replace(".mat", "")  # Remove .mat extension
+
+    # Extract everything before "_a" (constant part of the filename)
+    base_match = re.match(r"(.+?)_[a-zA-Z]", filename)
+    base_name = base_match.group(1) if base_match else filename
+
+    # Extract all parameter-value pairs (e.g., a0.1, b1.42e-06, c0.5)
+    pattern = r"_([a-zA-Z])([-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)"
+    matches = re.findall(pattern, filename)
+
+    # Convert parameter names to uppercase (A, B, C) and store values as floats
+    extracted_values = {match[0].upper(): float(match[1]) for match in matches}
+
+    return base_name, extracted_values
+
+
+def save_results_to_excel2(functions, directory, output_xlsx, limits=None):
+    filenames = None
+    all_results = []
+    headers = ["Filename", "Base_Name"]
+    extracted_data = []
+
+    if limits is None:
+        limits = np.array([None])  # Use NumPy array instead of a list
+
+    limits = np.asarray(limits)  # Ensure limits is a NumPy array
+
+    # Get all filenames to extract variable names
+    filenames = [f for f in os.listdir(directory) if f.endswith(".mat")]
+
+    if not filenames:
+        print("No .mat files found in the directory.")
+        return
+
+    # Extract variable names dynamically from the first file
+    _, first_extracted_values = extract_filename_info(filenames[0])
+    variable_names = sorted(first_extracted_values.keys())  # ['A', 'B', 'C']
+    headers.extend(variable_names)  # Add A, B, C as headers
+
+    # Extract values from all filenames
+    for filename in filenames:
+        base_name, extracted_values = extract_filename_info(filename)
+        extracted_data.append([filename, base_name] + [extracted_values.get(var, None) for var in variable_names])
+
+    # Process each function
+    for func in functions:
+        func_name = func.__name__
+        func_params = inspect.signature(func).parameters
+
+        if "limit" in func_params:
+            for limit in limits:
+                limit_str = f"_{int(limit)}" if limit is not None else ""
+                # headers.extend([f"{func_name}{limit_str}_rw{i + 1}" for i in range(4)])
+                headers.append(f"{func_name}{limit_str}_sum")
+
+                _, results = repeat_function(lambda f: func(f, limit=int(limit)), directory)
+                sum_results = np.sum(results, axis=1, keepdims=True)
+                # results_with_sum = np.hstack([results, sum_results])
+                all_results.append(sum_results)
+        else:
+            # headers.extend([f"{func_name}_rw{i + 1}" for i in range(4)])
+            headers.append(f"{func_name}_sum")
+
+            _, results = repeat_function(func, directory)
+            sum_results = np.sum(results, axis=1, keepdims=True)
+            # results_with_sum = np.hstack([results, sum_results])
+            all_results.append(sum_results)
+
+    all_results = np.hstack(all_results)  # Combine all results horizontally
+
+    # Create a DataFrame
+    df = pd.DataFrame(np.column_stack([extracted_data, all_results]), columns=headers)
+
+    # Save to Excel
+    df.to_excel(output_xlsx, index=False, engine='openpyxl')
+
+    print(f"Results saved to {output_xlsx} (Excel format)")
+
+
+def count_zero_crossings(dataset):
+    from scipy.io import loadmat
+
+    # Load data
+    data = loadmat(dataset)
+    omega = data['all_w_sol']  # Shape: (N, 4)
+
+    # Check for sign changes (zero crossings)
+    zero_crossings = np.sum(np.diff(np.sign(omega), axis=0) != 0, axis=0)
+
+    return zero_crossings
+
+
+# filenames, results = repeat_function(omega_squared_avg, 'Data/Auto/gauss_speedXtime')
+# print(filenames), print
+
+evaluation_functions = [count_zero_crossings, power, omega_squared_avg, time_stiction_accurate]
+zone = np.array([100, 125, 150, 175, 200, 225, 250, 275, 300])
+save_results_to_excel2(evaluation_functions, 'Data/Realtime', 'Data/Realtime/evaluate.xlsx', zone)
+
+
+print(sum(time_stiction_accurate('Data/Realtime/minmax_omega.mat', limit=300)))
+print(sum(omega_squared_avg('Data/Realtime/minmax_omega.mat')))
+print(sum(power('Data/Realtime/minmax_omega.mat')))

@@ -51,3 +51,10 @@ Arctangent function, infeasible solution, minimizes too slowly
 \frac{1}{\pi}\arctan\left(k\left(x-X\right)\right)+\frac{1}{\pi}\arctan\left(-k\left(x-Y\right)\right)+1
 arctan_expr = (1 / pi) * atan(k * (w - X)) + (1 / pi) * atan(-k * (w - Y)) + 1
 
+
+gauss_speedXtime_1: c*t
+gauss_speedXtime_2: 60
+gauss_speedXtime_3: 65
+gauss_speedXtime_4: 70
+gauss_speedXtime_5: 75
+gauss2_speedXtime_1: gauss 60, speed 75

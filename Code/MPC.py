@@ -15,7 +15,7 @@ helper, I_inv, R_pseudo, Null_R, Omega_max, w_initial, T_max = initialize_consta
 
 # Parameters
 total_points = 500  # Total points to simulate
-horizon_length = 20  # Horizon length for MPC
+horizon_length = 25  # Horizon length for MPC
 
 # Initialize storage for results
 all_w = np.zeros((4, horizon_length + 1, total_points))  # Store predictions over time
@@ -54,12 +54,12 @@ for i in range(total_points):
         ocp.set_initial(w, w_sol.T)
 
     # Objective function
-    a = 0.01
+    a = 0.1
     b = 1 / 700000
-    offset = 60
+    offset = 30
     k = 1.0
     time_dependent = (1 + np.tanh(k * (ocp.t - offset))) / 2
-    objective_expr_casadi = np.exp(-a * w ** 2) # + time_dependent*b * w ** 2
+    objective_expr_casadi = np.exp(-a * w ** 2) + time_dependent*b * w ** 2
     objective = ocp.integral(sum1(objective_expr_casadi))
     ocp.add_objective(objective)
 
