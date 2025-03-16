@@ -15,7 +15,8 @@ helper, I_inv, R_pseudo, Null_R, Omega_max, w_initial, T_max = initialize_consta
 
 total_points = 8000
 w_current = w_initial
-# w_current = np.random.uniform(-100, 100, (4, 1))  # 4x1 column vector
+omega_min = 10
+w_current = np.random.uniform(-100, 100, (4, 1))  # 4x1 column vector
 # alpha = np.linspace(-0.001, 0.001, 500).reshape(1, 500)
 
 w_sol = np.zeros((4, total_points+1))
@@ -42,6 +43,52 @@ def minmax_omega(torque_sc, omega):
 def pseudo(torque_sc, omega):
     return np.zeros((1, 1))
 
+def optimal_alpha(omega):
+    opt_alpha  = (- omega[0] + omega[1] - omega[2] + omega[3])/4
+    return opt_alpha
+
+def line_constraint(omega):
+    segments = np.zeros((4, 2))
+    for i in range(4):
+        first = (omega_min - omega[i])*(-1) ** i
+        second = (-omega_min - omega[i])*(-1) ** i
+        segments[i] = np.sort([first[0], second[0]]).flatten() # Potentially sort manually
+    return segments
+
+def overlap_constraint(segments):
+    segments = segments[np.argsort(segments[:, 0])]
+    merged = [segments[0]]
+
+    for current in segments[1:]:
+        last_merged = merged[-1]
+
+        if current[0] <= last_merged[1]:
+            merged[-1] = (last_merged[0], max(last_merged[1], current[1]))
+        else:
+            merged.append(current)
+    return np.array(merged)
+
+def constrained_alpha(omega):
+    segments = line_constraint(omega)
+    segments = overlap_constraint(segments)
+    opt_alpha = optimal_alpha(omega)
+    for segment in segments:
+        start, end = segment[0], segment[1]
+
+        if start <= opt_alpha <= end:
+            dist_start = abs(opt_alpha - start)
+            dist_end = abs(opt_alpha - end)
+
+            if dist_start == dist_end:
+                return start if abs(start) < abs(end) else end
+            else:
+                return start if dist_start < dist_end else end
+
+    return opt_alpha
+
+def omega_squared(omega):
+    return omega + np.array([[1], [-1], [1], [-1]]) * constrained_alpha(omega)
+
 
 def solve(calc_alpha_func=pseudo):
     global w_current
@@ -49,6 +96,9 @@ def solve(calc_alpha_func=pseudo):
         T_sc = full_data[:, i].reshape(3, 1)
         alpha = calc_alpha_func(T_sc, w_current).reshape(1, 1)
         alpha_sol[:, i] = alpha.flatten()
+        if i == 2000:
+            print(w_current)
+            print(optimal_alpha(w_current))
         T_rw = R_pseudo @ T_sc + Null_R @ alpha
 
         der_state = I_inv @ T_rw
@@ -75,8 +125,12 @@ def plot():
     plt.show()
 
 
-solve()
-save('pseudo')
+# solve()
+# save('pseudo')
 # plot()
+print(w_current)
+sol = constrained_alpha(w_current)
+sol2 = omega_squared(w_current)
+print(sol,sol2)
 
 
