@@ -15,8 +15,7 @@ helper, I_inv, R_pseudo, Null_R, Omega_max, w_initial, T_max = initialize_consta
 
 total_points = 8000
 w_current = w_initial
-omega_min = 10
-w_current = np.random.uniform(-100, 100, (4, 1))  # 4x1 column vector
+omega_min = 0
 # alpha = np.linspace(-0.001, 0.001, 500).reshape(1, 500)
 
 w_sol = np.zeros((4, total_points+1))
@@ -89,16 +88,12 @@ def constrained_alpha(omega):
 def omega_squared(omega):
     return omega + np.array([[1], [-1], [1], [-1]]) * constrained_alpha(omega)
 
-
 def solve(calc_alpha_func=pseudo):
     global w_current
     for i in range(total_points):
         T_sc = full_data[:, i].reshape(3, 1)
         alpha = calc_alpha_func(T_sc, w_current).reshape(1, 1)
         alpha_sol[:, i] = alpha.flatten()
-        if i == 2000:
-            print(w_current)
-            print(optimal_alpha(w_current))
         T_rw = R_pseudo @ T_sc + Null_R @ alpha
 
         der_state = I_inv @ T_rw
@@ -107,6 +102,14 @@ def solve(calc_alpha_func=pseudo):
         torque_sol[:, i] = T_rw.flatten()
     torque_sol[:, i] = T_rw.flatten()
 
+
+def sum_squared(omega):
+    return np.sum(omega**2)
+
+def repeat_omega_squared(omega):
+    for i in range(omega.shape[1]):
+        omega[:, i] = omega_squared(omega[:, i].reshape(4, 1)).flatten()
+    return omega
 
 def save(name='output'):
     data_to_save = {
@@ -125,12 +128,39 @@ def plot():
     plt.show()
 
 
-# solve()
+solve(minmax_omega)
 # save('pseudo')
 # plot()
-print(w_current)
-sol = constrained_alpha(w_current)
-sol2 = omega_squared(w_current)
-print(sol,sol2)
+# print(w_current)
+# print("Sum:", sum_squared(w_current))
+# sol = constrained_alpha(w_current)
+# sol2 = omega_squared(w_current)
+# print(sol2)
+# print("Sum:", sum_squared(sol2))
+# w_current = np.random.uniform(-100, 100, (4, 8000))  # 4x1 column vector
+w1 = w_sol.copy()
+w2 = repeat_omega_squared(w_sol)
+
+sumsq1 = np.sum(w1**2, axis=0)
+sumsq2 = np.sum(w2**2, axis=0)
+diff = sumsq1 - sumsq2
+# Create subplots
+fig, ax = plt.subplots(1, 2, figsize=(12, 6))  # 1 row, 2 columns
+
+# Plot the first plot in the first subplot
+ax[0].plot(w1.T)
+ax[0].set_title('w1')
+
+# Plot the second plot in the second subplot
+ax[1].plot(w2.T)
+ax[1].set_title('w2')
+
+# Show the plot
+plt.tight_layout()  # Adjust spacing between subplots
+plt.show()
+
+
+
+
 
 
