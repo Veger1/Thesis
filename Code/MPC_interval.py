@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from casadi import sum1
 from rockit import Ocp, MultipleShooting
+from scipy.io import savemat
+
 from init_helper import load_data, initialize_constants
 import sys
 import time
@@ -14,7 +16,7 @@ full_data = load_data()
 helper, I_inv, R_pseudo, Null_R, Omega_max, w_initial, T_max = initialize_constants()
 
 # Parameters
-total_points = 3000  # Total points to simulate
+total_points = 8000  # Total points to simulate
 horizon_length = 20  # Horizon length for MPC
 update_interval = 5  # Solve MPC every X timesteps
 
@@ -94,6 +96,14 @@ end_time = time.time()
 execution_time = end_time - start_time
 print(f"\nScript took {execution_time:.4f} seconds.")
 
+# SAVING DATA
+save = True
+if save:
+    data_to_save = {
+        'all_w_sol': actual_w
+    }
+    savemat('Data/output.mat', data_to_save)
+
 # --- PLOTTING ---
 fig, ax = plt.subplots(figsize=(10, 6))
 actual_lines = [ax.plot([], [], label=f"State {j + 1}", linestyle="-")[0] for j in range(4)]
@@ -115,7 +125,7 @@ def update_plot(frame):
     return actual_lines + pred_lines
 
 ani = animation.FuncAnimation(fig, update_plot, frames=total_points, interval=10, blit=True)
-write = True
+write = False
 if write:
     Writer = animation.writers['ffmpeg']
     writer = Writer(fps=20, metadata=dict(artist='Me'), bitrate=1800)

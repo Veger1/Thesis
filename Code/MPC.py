@@ -26,6 +26,14 @@ all_T_rw = np.zeros((4, total_points))  # Store all reaction wheel torques
 # Initial state
 w_current = w_initial
 
+solver_opts = {
+        "print_time": False,  # Suppress overall solver timing
+        "ipopt": {
+            "print_level": 0,  # Disable IPOPT output
+            "sb": "yes"  # Suppress banner output
+        }
+    }
+
 # MPC loop (now runs before any plotting)
 for i in range(total_points):
     sys.stdout.write(f"\rSolving MPC for time step {i + 1}/{total_points}")
@@ -64,13 +72,6 @@ for i in range(total_points):
     ocp.add_objective(objective)
 
     # Solve
-    solver_opts = {
-        "print_time": False,  # Suppress overall solver timing
-        "ipopt": {
-            "print_level": 0,  # Disable IPOPT output
-            "sb": "yes"  # Suppress banner output
-        }
-    }
     ocp.solver('ipopt', solver_opts)
     ocp.method(MultipleShooting(N=horizon_length, M=1, intg='rk'))
     sol = ocp.solve()

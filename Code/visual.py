@@ -1,16 +1,20 @@
 import os
-
 from matplotlib import pyplot as plt
 from matplotlib.ticker import ScalarFormatter
 from scipy.io import loadmat, whosmat
 import numpy as np
 from matplotlib.animation import FuncAnimation, writers
 from sympy import lambdify, symbols, sympify
-
 from helper import Helper
+from init_helper import load_data, initialize_constants
 
-helper = Helper()
 
+test_data_T_full = load_data()  # This is the full test data (8004 samples)
+helper, I_inv, R_rwb_pseudo, Null_Rbrw, Omega_max, Omega_start, T_max = initialize_constants()
+beta = np.radians(60)
+R_brw = np.array([[np.sin(beta), 0, -np.sin(beta), 0],
+                      [0, np.sin(beta), 0, -np.sin(beta)],
+                      [np.cos(beta), np.cos(beta), np.cos(beta), np.cos(beta)]])
 
 def load_data(dataset):  # Improve by doing the flattening/transposing here, this function
     # essentially does nothing except catching exceptions
@@ -341,17 +345,171 @@ def repeat_function(func, directory):
             data = loadmat(filepath)
             func(data)
 
+def plot_omega_squared():
+    w_range = np.linspace(-300, 300, 100)  # Range for w values
+    w1, w2 = np.meshgrid(w_range, w_range)  # Grid for first plot
+    w3, w4 = np.meshgrid(w_range, w_range)  # Grid for second plot
 
-# data = loadmat('Data/Auto/gauss_speedXtime/gaussian_speedXtime_dep_a0.1_b1e-05_c1.mat')
+    cost1 = w1 ** 2 + w2 ** 2  # Cost when varying w1, w2
+    cost2 = w3 ** 2 + w4 ** 2  # Cost when varying w3, w4
 
+    random_omega = np.random.uniform(-200, 200, (4,))
+    w1_rand, w2_rand, w3_rand, w4_rand = random_omega
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    # First subplot (w1 vs w2)
+    contour1 = axes[0].contourf(w1, w2, cost1, levels=30, cmap='viridis')
+    axes[0].scatter(w1_rand, w2_rand, color='red', marker='o', s=100, label="Random ω")
+    axes[0].set_xlabel("w1")
+    axes[0].set_ylabel("w2")
+    axes[0].set_title("Cost Visualization (w1 vs w2)")
+    fig.colorbar(contour1, ax=axes[0])  # Add colorbar
+
+    # Second subplot (w3 vs w4)
+    contour2 = axes[1].contourf(w3, w4, cost2, levels=30, cmap='viridis')
+    axes[1].scatter(w3_rand, w4_rand, color='red', marker='o', s=100, label="Random ω")
+    axes[1].set_xlabel("w3")
+    axes[1].set_ylabel("w4")
+    axes[1].set_title("Cost Visualization (w3 vs w4)")
+    fig.colorbar(contour2, ax=axes[1])  # Add colorbar
+
+    omega_min = 30
+
+    for ax in axes:
+        ax.axhline(omega_min, color='white', linestyle='dotted', linewidth=1)
+        ax.axhline(-omega_min, color='white', linestyle='dotted', linewidth=1)
+        ax.axvline(omega_min, color='white', linestyle='dotted', linewidth=1)
+        ax.axvline(-omega_min, color='white', linestyle='dotted', linewidth=1)
+
+    for ax, (w_x, w_y) in zip(axes, [(w1_rand, w2_rand), (w3_rand, w4_rand)]):
+        x_vals = np.array(ax.get_xlim())  # Get current x-axis limits
+        y_vals = w_y - (x_vals - w_x)  # y = (x - w_x) + w_y (45-degree line)
+        ax.plot(x_vals, y_vals, color='white', linestyle='dashed', linewidth=1)
+
+    axes[0].set_xlim(-300, 300)
+    axes[0].set_ylim(-300, 300)
+    axes[1].set_xlim(-300, 300)
+    axes[1].set_ylim(-300, 300)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def live_plot_omega_squared(data):
+    omega_values = data['all_w_sol'].T
+    if omega_values.shape[0] != 4:
+        raise ValueError("omega_values should have shape (4, N)")
+    N = omega_values.shape[1]  # Number of frames
+    w_range = np.linspace(-300, 300, 100)  # Range for w values
+    w1, w2 = np.meshgrid(w_range, w_range)  # Grid for first plot
+    w3, w4 = np.meshgrid(w_range, w_range)  # Grid for second plot
+
+    cost1 = w1**2 + w2**2  # Cost when varying w1, w2
+    cost2 = w3**2 + w4**2  # Cost when varying w3, w4
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    # First subplot (w1 vs w2)
+    contour1 = axes[0].contourf(w1, w2, cost1, levels=30, cmap='viridis')
+    scatter1, = axes[0].plot([], [], 'ro', markersize=8)
+    axes[0].set_xlabel("w1")
+    axes[0].set_ylabel("w2")
+    axes[0].set_title("Cost Visualization (w1 vs w2)")
+    fig.colorbar(contour1, ax=axes[0])
+
+    # Second subplot (w3 vs w4)
+    contour2 = axes[1].contourf(w3, w4, cost2, levels=30, cmap='viridis')
+    scatter2, = axes[1].plot([], [], 'ro', markersize=8)
+    axes[1].set_xlabel("w3")
+    axes[1].set_ylabel("w4")
+    axes[1].set_title("Cost Visualization (w3 vs w4)")
+    fig.colorbar(contour2, ax=axes[1])
+
+    omega_min = 50
+
+    for ax in axes:
+        ax.axhline(omega_min, color='white', linestyle='dotted', linewidth=1)
+        ax.axhline(-omega_min, color='white', linestyle='dotted', linewidth=1)
+        ax.axvline(omega_min, color='white', linestyle='dotted', linewidth=1)
+        ax.axvline(-omega_min, color='white', linestyle='dotted', linewidth=1)
+
+    line1, = axes[0].plot([], [], 'w--', linewidth=1)
+    line2, = axes[1].plot([], [], 'w--', linewidth=1)
+
+    def update(frame):
+        w1_rand, w2_rand, w3_rand, w4_rand = omega_values[:, frame]
+
+        # Update scatter points
+        scatter1.set_data([w1_rand], [w2_rand])  # Wrapping values in a list to make them sequences
+        scatter2.set_data([w3_rand], [w4_rand])
+
+        # Update diagonal lines
+        x_vals = np.array(axes[0].get_xlim())
+        line1.set_data(x_vals, w2_rand - (x_vals - w1_rand))
+        line2.set_data(x_vals, w4_rand - (x_vals - w3_rand))
+
+        return scatter1, scatter2, line1, line2
+
+    ani = FuncAnimation(fig, update, frames=N, interval=100, blit=True)
+    plt.show()
+
+
+def check_momentum(data):
+    omega = data['all_w_sol'].T
+    momentum = R_brw @ omega
+    fig, ax = plt.subplots(1, 1, figsize=(9, 6))
+    ax.plot(momentum.T)
+
+def check_momentum2(data):
+    omega = data['all_w_sol']
+    momentum = R_brw @ omega
+    fig, ax = plt.subplots(1, 1, figsize=(9, 6))
+    ax.plot(momentum.T)
+
+def check_omega_squared(data):
+    omega = data['all_w_sol'].T
+    omega_squared = np.sum(omega**2, axis=0)
+    fig, ax = plt.subplots(1, 1, figsize=(9, 6))
+    ax.plot(omega_squared)
+
+def check_omega_squared2(data):
+    omega = data['all_w_sol'].T
+    omega_squared = np.sum(omega**2, axis=1)
+    fig, ax = plt.subplots(1, 1, figsize=(9, 6))
+    ax.plot(omega_squared)
+
+def check_diff(data1, data2):
+    omega1 = data1['all_w_sol'].T
+    sq1 = np.sum(omega1**2, axis=0)
+    omega2 = data2['all_w_sol'].T
+    sq1 = np.sum(omega2 ** 2, axis=0)
+    diff = sq1 - sq1
+    fig, ax = plt.subplots(1, 1, figsize=(9, 6))
+    ax.plot(diff.T)
+    fig, ax = plt.subplots(1, 1, figsize=(9, 6))
+    ax.plot(sq1)
+    ax.plot(sq1)
+
+
+
+data1 = loadmat('Data/Realtime/output.mat')
+check_momentum2(data1)
+data2 = loadmat('Data/Realtime/minmax_omega.mat')
+check_momentum(data2)
+data3 = loadmat('Data/Realtime/squared_omega.mat')
+check_momentum(data3)
+# check_diff(data1, data2)
+plt.show()
 # plot_cost_function(data)
 # plot_cost_time(data)
 # live_cost_plot(data)
 # plot_radians(data)
 # plot_torque(data)
 # plot_a(data)
-plot_input(1)
-
+# plot_input(1)
+# plot_omega_squared()
+# live_plot_omega_squared(data)
 #repeat_function(live_cost_plot, 'Data/Auto/gauss_speedXtime')
 
 # plot_difference(loadmat('Data/slow1.mat'), loadmat('Data/fast1.mat'))

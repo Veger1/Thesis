@@ -1,9 +1,6 @@
-from casadi import arctan
 from sympy import symbols, exp, Abs, tanh, atan, pi
 from Code.repeat_solver import solve_ocp, calc_cost, unconstrained_solve_ocp, fast_solve_ocp
 from scipy.io import savemat
-# import tkinter as tk
-# from tkinter import messagebox
 
 num_intervals, N = 8, 500
 scaling, time = 1.0, float(N/10)

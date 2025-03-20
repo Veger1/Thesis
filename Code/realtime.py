@@ -15,7 +15,7 @@ helper, I_inv, R_pseudo, Null_R, Omega_max, w_initial, T_max = initialize_consta
 
 total_points = 8000
 w_current = w_initial
-omega_min = 0
+# w_current = np.random.uniform(-100, 100, (4, 1))
 # alpha = np.linspace(-0.001, 0.001, 500).reshape(1, 500)
 
 w_sol = np.zeros((4, total_points+1))
@@ -37,6 +37,11 @@ def minmax_omega(torque_sc, omega):
     alpha_null = nominator / denominator
     alpha_best = (max(alpha_null) + min(alpha_null)) / 2
     return alpha_best
+
+def squared_omega(torque_sc, omega):
+    omega_new = omega + 0.1*I_inv @ R_pseudo @ torque_sc
+    alpha =  constrained_alpha(omega_new)
+    return -alpha/(0.1*41802.61224523921)
 
 
 def pseudo(torque_sc, omega):
@@ -111,6 +116,12 @@ def repeat_omega_squared(omega):
         omega[:, i] = omega_squared(omega[:, i].reshape(4, 1)).flatten()
     return omega
 
+
+def convert_to_index(matrix):
+    signs = (matrix >= 0).astype(int)  # Convert positive numbers to 1, negative to 0
+    indices = signs[0] * 8 + signs[1] * 4 + signs[2] * 2 + signs[3] * 1  # Binary to decimal conversion
+    return indices
+
 def save(name='output'):
     data_to_save = {
         'all_w_sol': w_sol.T,
@@ -127,19 +138,12 @@ def plot():
     plt.plot(alpha_sol.T)
     plt.show()
 
+omega_min = 10
 
-solve(minmax_omega)
-# save('pseudo')
-# plot()
-# print(w_current)
-# print("Sum:", sum_squared(w_current))
-# sol = constrained_alpha(w_current)
-# sol2 = omega_squared(w_current)
-# print(sol2)
-# print("Sum:", sum_squared(sol2))
-# w_current = np.random.uniform(-100, 100, (4, 8000))  # 4x1 column vector
-w1 = w_sol.copy()
-w2 = repeat_omega_squared(w_sol)
+solve(squared_omega)
+w2 = w_sol.copy()
+w1 = repeat_omega_squared(w_sol)
+
 
 sumsq1 = np.sum(w1**2, axis=0)
 sumsq2 = np.sum(w2**2, axis=0)
@@ -154,10 +158,18 @@ ax[0].set_title('w1')
 # Plot the second plot in the second subplot
 ax[1].plot(w2.T)
 ax[1].set_title('w2')
-
+y_min = min(w1.min(), w2.min())
+y_max = max(w1.max(), w2.max())
+for a in ax:
+    a.set_ylim(y_min, y_max)
 # Show the plot
 plt.tight_layout()  # Adjust spacing between subplots
 plt.show()
+
+index = convert_to_index(w1)
+plt.plot(index)
+plt.show()
+
 
 
 
