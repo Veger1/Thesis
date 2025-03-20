@@ -1,20 +1,14 @@
 import os
 from matplotlib import pyplot as plt
 from matplotlib.ticker import ScalarFormatter
-from scipy.io import loadmat, whosmat
+from scipy.io import loadmat
 import numpy as np
 from matplotlib.animation import FuncAnimation, writers
 from sympy import lambdify, symbols, sympify
-from helper import Helper
-from init_helper import load_data, initialize_constants
+from config import *
+from helper import *
 
-
-test_data_T_full = load_data()  # This is the full test data (8004 samples)
-helper, I_inv, R_rwb_pseudo, Null_Rbrw, Omega_max, Omega_start, T_max = initialize_constants()
-beta = np.radians(60)
-R_brw = np.array([[np.sin(beta), 0, -np.sin(beta), 0],
-                      [0, np.sin(beta), 0, -np.sin(beta)],
-                      [np.cos(beta), np.cos(beta), np.cos(beta), np.cos(beta)]])
+full_data = load_data('Data/Slew1.mat')
 
 def load_data(dataset):  # Improve by doing the flattening/transposing here, this function
     # essentially does nothing except catching exceptions
@@ -66,7 +60,7 @@ def plot_rpm(loaded_data):
         plt.axhline(y=6000, color='r', linestyle='--', label=f'rpm=6000')
         plt.axhline(y=-6000, color='r', linestyle='--', label=f'rpm=-6000')
         plt.fill([all_t[0], all_t[0], all_t[-1], all_t[-1]],[-300, 300, 300, -300], 'r', alpha=0.1)
-        plt.plot(all_t, helper.rad_to_rpm(all_w_sol))
+        plt.plot(all_t, rad_to_rpm(all_w_sol))
         plt.xlabel('Time (s)')
         plt.ylabel('RPM')
         plt.title('RPM vs Time')
@@ -255,7 +249,7 @@ def plot_MPI():
     mpi_data = loadmat('Data/50s/MPI.mat')
     w_sol = mpi_data['all_w_sol']
     mpi_data = loadmat('Data/50s/stic1.mat')
-    plt.plot(mpi_data['all_t'].flatten(), helper.rad_to_rpm(w_sol[:8000, :]))
+    plt.plot(mpi_data['all_t'].flatten(), rad_to_rpm(w_sol[:8000, :]))
     plt.axhline(y=6000, color='r', linestyle='--', label=f'rpm=6000')
     plt.axhline(y=-6000, color='r', linestyle='--', label=f'rpm=-6000')
     plt.fill([0, 0, 800, 800], [-300, 300, 300, -300], 'r', alpha=0.1)
@@ -457,13 +451,13 @@ def live_plot_omega_squared(data):
 
 def check_momentum(data):
     omega = data['all_w_sol'].T
-    momentum = R_brw @ omega
+    momentum = R @ omega
     fig, ax = plt.subplots(1, 1, figsize=(9, 6))
     ax.plot(momentum.T)
 
 def check_momentum2(data):
     omega = data['all_w_sol']
-    momentum = R_brw @ omega
+    momentum = R @ omega
     fig, ax = plt.subplots(1, 1, figsize=(9, 6))
     ax.plot(momentum.T)
 

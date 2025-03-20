@@ -4,19 +4,16 @@ import matplotlib.animation as animation
 from casadi import sum1
 from rockit import Ocp, MultipleShooting
 from scipy.io import savemat
-
-from init_helper import load_data, initialize_constants
 import sys
 import time
+from config import *
 
 
-full_data = load_data()
-helper, I_inv, R_pseudo, Null_R, Omega_max, w_initial, T_max = initialize_constants()
+full_data = load_data('Data/Slew1.mat')
 
 total_points = 8000
-w_current = w_initial
+w_current, w_initial = OMEGA_START, OMEGA_START
 # w_current = np.random.uniform(-100, 100, (4, 1))
-# alpha = np.linspace(-0.001, 0.001, 500).reshape(1, 500)
 
 w_sol = np.zeros((4, total_points+1))
 torque_sol = np.zeros((4, total_points+1))
@@ -25,23 +22,23 @@ alpha_sol = np.zeros((1, total_points))
 
 
 def minmax_torque(torque_sc, omega):
-    T_rw = R_pseudo @ torque_sc  # + Null_R @ alpha
-    alpha_null = -T_rw / Null_R
+    T_rw = R_PSEUDO @ torque_sc  # + Null_R @ alpha
+    alpha_null = -T_rw / NULL_R
     alpha_best = (max(alpha_null) + min(alpha_null)) / 2
     return alpha_best
 
 
 def minmax_omega(torque_sc, omega):
-    nominator = - omega - 0.1*I_inv @ R_pseudo @ torque_sc
-    denominator = 0.1*I_inv @ Null_R
+    nominator = - omega - 0.1*I_INV @ R_PSEUDO @ torque_sc
+    denominator = 0.1*I_INV @ NULL_R
     alpha_null = nominator / denominator
     alpha_best = (max(alpha_null) + min(alpha_null)) / 2
     return alpha_best
 
 def squared_omega(torque_sc, omega):
-    omega_new = omega + 0.1*I_inv @ R_pseudo @ torque_sc
+    omega_new = omega + 0.1*I_INV @ R_PSEUDO @ torque_sc
     alpha =  constrained_alpha(omega_new)
-    return -alpha/(0.1*41802.61224523921)
+    return -alpha/(0.1*41802.61224523921)  # replace with IRW
 
 
 def pseudo(torque_sc, omega):
@@ -99,9 +96,9 @@ def solve(calc_alpha_func=pseudo):
         T_sc = full_data[:, i].reshape(3, 1)
         alpha = calc_alpha_func(T_sc, w_current).reshape(1, 1)
         alpha_sol[:, i] = alpha.flatten()
-        T_rw = R_pseudo @ T_sc + Null_R @ alpha
+        T_rw = R_PSEUDO @ T_sc + NULL_R @ alpha
 
-        der_state = I_inv @ T_rw
+        der_state = I_INV @ T_rw
         w_current = w_current + der_state * 0.1
         w_sol[:, i+1] = w_current.flatten()
         torque_sol[:, i] = T_rw.flatten()

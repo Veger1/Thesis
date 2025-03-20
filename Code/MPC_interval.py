@@ -4,21 +4,18 @@ import matplotlib.animation as animation
 from casadi import sum1
 from rockit import Ocp, MultipleShooting
 from scipy.io import savemat
-
-from init_helper import load_data, initialize_constants
 import sys
 import time
+from config import *
 
 start_time = time.time()
 
-# Load data and initialize constants
-full_data = load_data()
-helper, I_inv, R_pseudo, Null_R, Omega_max, w_initial, T_max = initialize_constants()
+full_data = load_data('Data/Slew1.mat')
 
 # Parameters
-total_points = 8000  # Total points to simulate
-horizon_length = 20  # Horizon length for MPC
-update_interval = 5  # Solve MPC every X timesteps
+total_points = 8000  # N
+horizon_length = 20  # H
+update_interval = 5  # U
 
 # Initialize storage for results
 all_w = np.zeros((4, horizon_length + 1, total_points))  # Store predictions over time
@@ -27,7 +24,7 @@ all_alpha = np.zeros(total_points)  # Store all control actions
 all_T_rw = np.zeros((4, total_points))  # Store all reaction wheel torques
 
 # Initial state
-w_current = w_initial
+w_current, w_initial = OMEGA_START, OMEGA_START
 alpha_buffer = np.zeros(update_interval)  # Buffer to hold control actions
 alpha_buffer_next = np.zeros(update_interval)
 
@@ -49,12 +46,12 @@ for i in range(total_points):
         ocp.set_value(T_sc, data)
 
         # Dynamics
-        T_rw = R_pseudo @ T_sc + Null_R @ alpha
-        der_state = I_inv @ T_rw
+        T_rw = R_PSEUDO @ T_sc + NULL_R @ alpha
+        der_state = I_INV @ T_rw
         ocp.set_der(w, der_state)
 
-        ocp.subject_to(-T_max <= (T_rw <= T_max))  # Reaction wheel torque limits
-        ocp.subject_to(-Omega_max <= (w <= Omega_max))  # Angular velocity limits
+        ocp.subject_to(-MAX_TORQUE <= (T_rw <= MAX_TORQUE))  # Reaction wheel torque limits
+        ocp.subject_to(-OMEGA_MAX <= (w <= OMEGA_MAX))  # Angular velocity limits
         ocp.subject_to(ocp.at_t0(w) == w_current)
 
         # Objective function
@@ -68,8 +65,7 @@ for i in range(total_points):
         ocp.add_objective(objective)
 
         # Solve
-        solver_opts = {"print_time": False, "ipopt": {"print_level": 0, "sb": "yes"}}
-        ocp.solver('ipopt', solver_opts)
+        ocp.solver('ipopt', SOLVER_OPTS)
         ocp.method(MultipleShooting(N=horizon_length, M=1, intg='rk'))
         sol = ocp.solve()
 
@@ -85,8 +81,8 @@ for i in range(total_points):
     j = i % update_interval
     data_live = full_data[:, i]
     alpha = alpha_buffer[j].reshape(1)
-    torque = R_pseudo @ data_live + Null_R @ alpha
-    w_current = w_current + I_inv @ torque.reshape(-1, 1) * 0.1
+    torque = R_PSEUDO @ data_live + NULL_R @ alpha
+    w_current = w_current + I_INV @ torque.reshape(-1, 1) * 0.1
 
     actual_w[:, i] = w_current.reshape(-1)
     all_alpha[i] = alpha_buffer[j]
@@ -109,7 +105,7 @@ fig, ax = plt.subplots(figsize=(10, 6))
 actual_lines = [ax.plot([], [], label=f"State {j + 1}", linestyle="-")[0] for j in range(4)]
 pred_lines = [ax.plot([], [], linestyle="dotted")[0] for j in range(4)]
 ax.set_xlim(0, total_points + horizon_length)
-ax.set_ylim(-Omega_max, Omega_max)
+ax.set_ylim(-OMEGA_MAX, OMEGA_MAX)
 ax.set_title("MPC Prediction vs Actual Evolution")
 ax.set_xlabel("Time Steps")
 ax.set_ylabel("Angular Velocity w")

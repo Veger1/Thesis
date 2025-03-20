@@ -1,4 +1,3 @@
-from casadi import arctan
 from sympy import symbols, exp, tanh, pi, Mul
 from itertools import product
 from Code.repeat_solver import fast_solve_ocp, calc_cost, solve_ocp

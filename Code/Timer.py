@@ -1,17 +1,15 @@
 import csv
-
 import numpy as np
 from casadi import sum1
 from rockit import Ocp, MultipleShooting
-from init_helper import load_data, initialize_constants
 import sys
 import timeit
+from config import *
 
 
 def mpc_solve(horizon):
     # Load data and initialize constants
-    full_data = load_data()
-    helper, I_inv, R_pseudo, Null_R, Omega_max, w_initial, T_max = initialize_constants()
+    full_data = load_data('Data/Slew1.mat')
 
     # Parameters
     total_points = 500  # Total points to simulate
@@ -24,7 +22,7 @@ def mpc_solve(horizon):
     all_T_rw = np.zeros((4, total_points))  # Store all reaction wheel torques
 
     # Initial state
-    w_current = w_initial
+    w_current, w_initial = OMEGA_START, OMEGA_START
 
     ocp = Ocp(t0=0, T=horizon_length/10)
     w = ocp.state(4)
@@ -37,12 +35,12 @@ def mpc_solve(horizon):
     data = full_data[:, :horizon_length]  # Input torque profile CHANGE
     ocp.set_value(T_sc, data)
 
-    T_rw = R_pseudo @ T_sc + Null_R @ alpha  # Model/Dynamics
-    der_state = I_inv @ T_rw
+    T_rw = R_PSEUDO @ T_sc + NULL_R @ alpha  # Model/Dynamics
+    der_state = I_INV @ T_rw
     ocp.set_der(w, der_state)
 
-    ocp.subject_to(-T_max <= (T_rw <= T_max))  # Constraints
-    ocp.subject_to(-Omega_max <= (w <= Omega_max))
+    ocp.subject_to(-MAX_TORQUE <= (T_rw <= MAX_TORQUE))  # Constraints
+    ocp.subject_to(-OMEGA_MAX <= (w <= OMEGA_MAX))
 
     ocp.subject_to(ocp.at_t0(w) == w0)
     ocp.set_initial(w, w0)  # Only work for FIRST interval, does not update for subsequent intervals
@@ -56,14 +54,7 @@ def mpc_solve(horizon):
     objective = ocp.integral(sum1(objective_expr_casadi))
     ocp.add_objective(objective)
 
-    solver_opts = {
-            "print_time": False,  # Suppress overall solver timing
-            "ipopt": {
-                "print_level": 0,  # Disable IPOPT output
-                "sb": "yes"  # Suppress banner output
-            }
-        }
-    ocp.solver('ipopt', solver_opts)
+    ocp.solver('ipopt', SOLVER_OPTS)
     ocp.method(MultipleShooting(N=horizon_length, M=1, intg='rk'))
 
     constraint = ocp.sample(T_sc, grid='control-')[1]  # input/output

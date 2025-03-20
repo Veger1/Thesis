@@ -1,20 +1,13 @@
 import csv
 import inspect
 import re
-
 import pandas as pd
 from scipy.interpolate import interp1d
 from scipy.io import loadmat
 import numpy as np
 import os
-from helper import Helper
-
-helper = Helper()
-
-# Define Omega thresholds
-Omega_max = helper.rpm_to_rad(300)
-Omega_min = -helper.rpm_to_rad(300)
-Omega_tgt = helper.rpm_to_rad(1000)
+from config import *
+from helper import *
 
 
 def time_stiction(dataset, limit=None):
@@ -24,12 +17,14 @@ def time_stiction(dataset, limit=None):
     stiction_time = np.zeros(4)
 
     if limit is not None:
-        Omega_max = helper.rpm_to_rad(limit)
+        omega_max = rpm_to_rad(limit)
+    else:
+        return None
 
     # Count occurrences in stiction zone
     for i in range(N):
         for j in range(4):
-            if abs(omega[i, j]) < Omega_max:
+            if abs(omega[i, j]) < omega_max:
                 stiction_time[j] += t
     return stiction_time
 
@@ -41,29 +36,31 @@ def time_stiction_accurate(dataset, limit=None):
     stiction_time = np.zeros(4)
 
     if limit is not None:
-        Omega_max = helper.rpm_to_rad(limit)
-        Omega_min = -Omega_max
+        omega_max = rpm_to_rad(limit)
+        omega_min = -omega_max
+    else:
+        return None
 
     for j in range(4):
         for i in range(N - 1):
-            if abs(omega[i, j]) < Omega_max or abs(omega[i + 1, j]) < Omega_max:
-                if abs(omega[i, j]) < Omega_max and abs(omega[i + 1, j]) < Omega_max:
+            if abs(omega[i, j]) < omega_max or abs(omega[i + 1, j]) < omega_max:
+                if abs(omega[i, j]) < omega_max and abs(omega[i + 1, j]) < omega_max:
                     stiction_time[j] += t
                 else:
-                    if abs(omega[i, j]) < Omega_max:
-                        if omega[i+1, j] > Omega_max:
-                            crossing_value = Omega_max
+                    if abs(omega[i, j]) < omega_max:
+                        if omega[i+1, j] > omega_max:
+                            crossing_value = omega_max
                         else:
-                            crossing_value = Omega_min
+                            crossing_value = omega_min
                     else:
-                        if omega[i, j] > Omega_max:
-                            crossing_value = Omega_max
+                        if omega[i, j] > omega_max:
+                            crossing_value = omega_max
                         else:
-                            crossing_value = Omega_min
+                            crossing_value = omega_min
                     interpolator = interp1d([omega[i, j], omega[i+1, j]], [time[i], time[i + 1]])
                     crossing_time = interpolator(crossing_value)
 
-                    if abs(omega[i, j]) < Omega_max:
+                    if abs(omega[i, j]) < omega_max:
                         # omega[i] is inside, add time from time[i] to crossing
                         stiction_time[j] += crossing_time - time[i]
                     else:
@@ -104,7 +101,7 @@ def omega_squared_sum(dataset):  # Score of 1 signifies average vibration level 
     omega_sqrd_sum = np.zeros(4)
     for i in range(N):
         for j in range(4):
-            omega_sqrd_sum[j] += (omega[i, j]/Omega_max) ** 2
+            omega_sqrd_sum[j] += (omega[i, j] / OMEGA_MAX) ** 2
     return omega_sqrd_sum
 
 
@@ -122,13 +119,13 @@ def power(dataset):
     omega, torque = data['all_w_sol'], data['all_T_sol']
     time = data['all_t'].flatten()
     t = time[2] - time[1]
-    power = np.zeros(4)
+    power_result = np.zeros(4)
     for i in range(len(time)):
         for j in range(4):
             pwr = omega[i, j] * torque[i, j]
             if pwr > 0:
-                power[j] += pwr
-    return power
+                power_result[j] += pwr
+    return power_result
 
 
 def sum_elements(function):
@@ -150,59 +147,6 @@ def repeat_function(func, directory):
     filenames_array = np.array(filenames)
     results_array = np.array(results)
     return filenames_array, results_array
-
-
-def save_results_to_csv(functions, directory, output_csv):
-    filenames = None
-    all_results = []
-    headers = ["Filename"]
-
-    for func in functions:
-        func_name = func.__name__
-        headers.extend([f"{func_name}_rw{i + 1}" for i in range(4)])
-        filenames, results = repeat_function(func, directory)
-        all_results.append(results)
-
-    all_results = np.hstack(all_results)  # Combine all results horizontally
-
-    with open(output_csv, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(headers)  # Write headers
-        for i, filename in enumerate(filenames):
-            writer.writerow([filename] + all_results[i].tolist())
-
-    print(f"Results saved to {output_csv}")
-
-
-def save_results_to_excel(functions, directory, output_xlsx):
-    filenames = None
-    all_results = []
-    headers = ["Filename"]
-
-    # Process each function
-    for func in functions:
-        func_name = func.__name__
-        headers.extend([f"{func_name}_rw{i + 1}" for i in range(4)])
-        headers.append(f"{func_name}_sum")  # Sum column
-        filenames, results = repeat_function(func, directory)
-
-        # Compute sum of 4 columns per function
-        sum_results = np.sum(results, axis=1, keepdims=True)  # Sum along row
-
-        # Stack results with sum column
-        results_with_sum = np.hstack([results, sum_results])
-        all_results.append(results_with_sum)
-
-    all_results = np.hstack(all_results)  # Combine all results horizontally
-
-    # Create a DataFrame for Excel output
-    df = pd.DataFrame(np.column_stack([filenames, all_results]), columns=headers)
-
-    # Save to Excel
-    df.to_excel(output_xlsx, index=False, engine='openpyxl')
-
-    print(f"Results saved to {output_xlsx} (Excel format)")
-
 
 def extract_filename_info(filename):
     """
@@ -229,7 +173,7 @@ def extract_filename_info(filename):
     return base_name, extracted_values
 
 
-def save_results_to_excel2(functions, directory, output_xlsx, limits=None):
+def save_to_excel(functions, directory, output_xlsx, limits=None):
     filenames = None
     all_results = []
     headers = ["Filename", "Base_Name"]
@@ -293,26 +237,15 @@ def save_results_to_excel2(functions, directory, output_xlsx, limits=None):
 
 
 def count_zero_crossings(dataset):
-    from scipy.io import loadmat
-
-    # Load data
     data = loadmat(dataset)
     omega = data['all_w_sol']  # Shape: (N, 4)
-
     # Check for sign changes (zero crossings)
     zero_crossings = np.sum(np.diff(np.sign(omega), axis=0) != 0, axis=0)
 
     return zero_crossings
 
-
-# filenames, results = repeat_function(omega_squared_avg, 'Data/Auto/gauss_speedXtime')
-# print(filenames), print
-
 evaluation_functions = [count_zero_crossings, power, omega_squared_avg, time_stiction_accurate]
-zone = np.array([100, 125, 150, 175, 200, 225, 250, 275, 300])
-save_results_to_excel2(evaluation_functions, 'Data/Realtime', 'Data/Realtime/evaluate.xlsx', zone)
+zone = np.array([100, 125, 150])
+save_to_excel(evaluation_functions, 'Data/100s', 'Data/TEST.xlsx', zone)
 
 
-print(sum(time_stiction_accurate('Data/Realtime/minmax_omega.mat', limit=300)))
-print(sum(omega_squared_avg('Data/Realtime/minmax_omega.mat')))
-print(sum(power('Data/Realtime/minmax_omega.mat')))

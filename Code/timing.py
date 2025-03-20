@@ -1,5 +1,4 @@
 import timeit
-from casadi import arctan
 from sympy import symbols, exp, Abs, tanh, atan, pi
 from Code.repeat_solver import solve_ocp
 

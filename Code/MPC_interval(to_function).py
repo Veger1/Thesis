@@ -4,29 +4,26 @@ import time
 from casadi import sum1
 from matplotlib import pyplot as plt
 from rockit import Ocp, MultipleShooting
-from init_helper import load_data, initialize_constants
+from config import *
 
 start_time = time.time()
 
-# Load data and initialize constants
-full_data = load_data()
-helper, I_inv, R_pseudo, Null_R, Omega_max, w_initial, T_max = initialize_constants()
+full_data = load_data('Data/Slew1.mat')
 
 # Parameters
-total_points = 1000  # Total points to simulate
-horizon_length = 5  # Horizon length for MPC
-update_interval = 5  # Solve MPC every 3 timesteps
+total_points = 1000  # N
+horizon_length = 5  # H
+update_interval = 5  # U
 
 # Initialize storage for results
-actual_w = np.zeros((4, total_points))  # Store actual past trajectory
-all_alpha = np.zeros(total_points)  # Store all control actions
-all_T_rw = np.zeros((4, total_points))  # Store all reaction wheel torques
+actual_w = np.zeros((4, total_points))  # Store actual past trajectory (4, N)
+all_alpha = np.zeros(total_points)  # Store all control actions (N)
+all_T_rw = np.zeros((4, total_points))  # Store all reaction wheel torques (4, N)
 
 # Initial state
-w_current = w_initial
-alpha_buffer = np.zeros(update_interval)  # Buffer to hold 3 control actions
-alpha_buffer_next = np.zeros(update_interval)
-
+w_current, w_initial = OMEGA_START, OMEGA_START
+alpha_buffer = np.zeros(update_interval)  # Buffer to hold 'update_interval' control actions (U)
+alpha_buffer_next = np.zeros(update_interval)  # (U)
 
 ocp = Ocp(t0=0, T=horizon_length / 10)
 w = ocp.state(4)
@@ -39,12 +36,12 @@ ocp.set_value(w0, w_initial)
 data = full_data[:, :horizon_length]  # Input torque profile CHANGE
 ocp.set_value(T_sc, data)
 
-T_rw = R_pseudo @ T_sc + Null_R @ alpha  # Model/Dynamics
-der_state = I_inv @ T_rw
+T_rw = R_PSEUDO @ T_sc + NULL_R @ alpha  # Model/Dynamics
+der_state = I_INV @ T_rw
 ocp.set_der(w, der_state)
 
-ocp.subject_to(-T_max <= (T_rw <= T_max))  # Constraints
-ocp.subject_to(-Omega_max <= (w <= Omega_max))
+ocp.subject_to(-MAX_TORQUE <= (T_rw <= MAX_TORQUE))  # Constraints
+ocp.subject_to(-OMEGA_MAX <= (w <= OMEGA_MAX))
 
 ocp.subject_to(ocp.at_t0(w) == w0)
 ocp.set_initial(w, w0)
@@ -54,11 +51,7 @@ objective_expr_casadi = np.exp(-a * w ** 2)
 objective = ocp.integral(sum1(objective_expr_casadi))
 ocp.add_objective(objective)
 
-solver_opts = {
-    "print_time": False,
-    "ipopt": {"print_level": 0, "sb": "yes"}
-}
-ocp.solver('ipopt', solver_opts)
+ocp.solver('ipopt', SOLVER_OPTS)
 ocp.method(MultipleShooting(N=horizon_length, M=1, intg='rk'))
 
 constraint = ocp.sample(T_sc, grid='control-')[1]
@@ -85,8 +78,8 @@ for i in range(total_points):
     j = i % update_interval
     data_live = full_data[:, i]
     alpha = alpha_buffer[j].reshape(1)
-    torque = R_pseudo @ data_live + Null_R @ alpha
-    w_current = w_current + I_inv @ torque.reshape(-1, 1) * 0.1
+    torque = R_PSEUDO @ data_live + NULL_R @ alpha
+    w_current = w_current + I_INV @ torque.reshape(-1, 1) * 0.1
 
     actual_w[:, i] = w_current.reshape(-1)  # Store actual trajectory
     all_alpha[i] = alpha_buffer[j]  # Apply buffered control action
