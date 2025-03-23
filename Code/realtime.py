@@ -1,19 +1,16 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from casadi import sum1
-from rockit import Ocp, MultipleShooting
 from scipy.io import savemat
-import sys
-import time
+from sympy import symbols, exp, Abs, tanh, atan, pi
 from config import *
+from repeat_solver import solve_ocp_index
 
 
-full_data = load_data('Data/Slew1.mat')
+full_data = load_data('Data/Slew1.mat')  # (3, 8004)
 
-total_points = 8000
+total_points = 8004
 w_current, w_initial = OMEGA_START, OMEGA_START
-# w_current = np.random.uniform(-100, 100, (4, 1))
+w_current = np.random.uniform(-100, 100, (4, 1))
 
 w_sol = np.zeros((4, total_points+1))
 torque_sol = np.zeros((4, total_points+1))
@@ -87,14 +84,18 @@ def constrained_alpha(omega):
 
     return opt_alpha
 
-def omega_squared(omega):
+def ideal_omega(omega):
     return omega + np.array([[1], [-1], [1], [-1]]) * constrained_alpha(omega)
 
-def solve(calc_alpha_func=pseudo):
+def solve(calc_alpha_func=pseudo, second_func=None):
     global w_current
+    low_torque_flag = hysteresis_filter(full_data, 0.000005, 0.000015)
     for i in range(total_points):
         T_sc = full_data[:, i].reshape(3, 1)
-        alpha = calc_alpha_func(T_sc, w_current).reshape(1, 1)
+        if second_func is not None and low_torque_flag[i]:
+            alpha = second_func(T_sc, w_current).reshape(1, 1)
+        else:
+            alpha = calc_alpha_func(T_sc, w_current).reshape(1, 1)
         alpha_sol[:, i] = alpha.flatten()
         T_rw = R_PSEUDO @ T_sc + NULL_R @ alpha
 
@@ -102,15 +103,71 @@ def solve(calc_alpha_func=pseudo):
         w_current = w_current + der_state * 0.1
         w_sol[:, i+1] = w_current.flatten()
         torque_sol[:, i] = T_rw.flatten()
-    torque_sol[:, i] = T_rw.flatten()
+    # torque_sol[:, i] = T_rw.flatten()
+
+
+def solve_ideal():
+    global w_current
+    global w_sol
+    solve(squared_omega)
+    low_torque_flag = hysteresis_filter(full_data, 0.000005, 0.000015)
+    # rising, falling = detect_transitions(low_torque_flag)
+    # print(rising, falling)
+
+    w, t = symbols('w t')
+    a = 0.01
+    gaus_expr = exp(-a * w ** 2)  # Gaussian function
+    cost_expr = gaus_expr
+
+    current_idx = 0
+
+    while current_idx < len(low_torque_flag):
+        if low_torque_flag[current_idx]:  #  (real-time control)
+            start_idx = current_idx
+            while current_idx < len(low_torque_flag) and low_torque_flag[current_idx]:
+                current_idx += 1
+            end_idx = current_idx  # End of the True section
+
+            # Loop through each point in the True section for real-time control
+            for point in range(start_idx, end_idx):
+                T_sc = full_data[:, point].reshape(3, 1)
+                alpha = pseudo(T_sc, w_current).reshape(1, 1)
+
+                T_rw = R_PSEUDO @ T_sc + NULL_R @ alpha
+                der_state = I_INV @ T_rw
+                w_current = w_current + der_state * 0.1
+
+                w_sol[:, point+1] = w_current.flatten()
+                alpha_sol[:, point] = alpha.flatten()
+                torque_sol[:, point] = T_rw.flatten()
+
+
+        else:  # (optimization)
+            start_idx = current_idx
+            while current_idx < len(low_torque_flag) and not low_torque_flag[current_idx]:
+                current_idx += 1
+            end_idx = current_idx  # End of the False section
+
+            N_points = end_idx - start_idx
+            w_end = w_sol[:, end_idx].reshape(4, 1)
+            print(f"Optimizing for {N_points} points")
+            omega_sol, alpha, T_sol = solve_ocp_index(cost_expr, start_idx, N_points, w_final=w_end)
+            print("Done")
+            omega_sol = omega_sol.T
+            T_sol = T_sol.T
+            w_sol[:, start_idx+1:end_idx+1] = omega_sol[:, :-1]
+            w_current = omega_sol[:, -1].reshape(4, 1)
+            alpha_sol[:, start_idx:end_idx] = alpha[:-1].reshape(1, N_points)
+            torque_sol[:, start_idx:end_idx] = T_sol[:, :-1]
+
 
 
 def sum_squared(omega):
     return np.sum(omega**2)
 
-def repeat_omega_squared(omega):
+def repeat_ideal_omega(omega):
     for i in range(omega.shape[1]):
-        omega[:, i] = omega_squared(omega[:, i].reshape(4, 1)).flatten()
+        omega[:, i] = ideal_omega(omega[:, i].reshape(4, 1)).flatten()
     return omega
 
 
@@ -135,37 +192,41 @@ def plot():
     plt.plot(alpha_sol.T)
     plt.show()
 
-omega_min = 10
 
-solve(squared_omega)
-w2 = w_sol.copy()
-w1 = repeat_omega_squared(w_sol)
+def plot_radians(data):
+    all_w_sol = data.T
+    all_t = np.linspace(0, all_w_sol.shape[0] / 10, all_w_sol.shape[0])
+    plt.axhline(y=600, color='r', linestyle='--', label=f'rad/s=600')
+    plt.axhline(y=-600, color='r', linestyle='--', label=f'rad/s=-600')
+    plt.fill([all_t[0], all_t[0], all_t[-1], all_t[-1]], [-omega_min, omega_min, omega_min, -omega_min], 'r', alpha=0.1)
+    plt.plot(all_t, all_w_sol)
+    # plt.ylim([-300, 300])
+    plt.xlabel('Time (s)')
+    plt.ylabel('Rad/s')
+    plt.title('Rad/s vs Time')
 
 
-sumsq1 = np.sum(w1**2, axis=0)
-sumsq2 = np.sum(w2**2, axis=0)
-diff = sumsq1 - sumsq2
-# Create subplots
-fig, ax = plt.subplots(1, 2, figsize=(12, 6))  # 1 row, 2 columns
+def plot_index(solution):
+    index = convert_to_index(solution)
+    plt.plot(index)
+    plt.title('Ideal Momentum Envelope vs Time')
+    plt.ylim([-1, 16])
+    plt.ylabel('Index')
+    plt.xlabel('Point')
+    plt.show()
+omega_min = 30
 
-# Plot the first plot in the first subplot
-ax[0].plot(w1.T)
-ax[0].set_title('w1')
+if __name__ == "__main__":
+    solve(squared_omega)
+    w1 = w_sol.copy()
+    plot_index(w1)
+    # w2 = repeat_ideal_omega(w_sol)
+    # solve_ideal()
+    w1 = w_sol.copy()
+    # save('ideal')
+    plot_radians(w1)
 
-# Plot the second plot in the second subplot
-ax[1].plot(w2.T)
-ax[1].set_title('w2')
-y_min = min(w1.min(), w2.min())
-y_max = max(w1.max(), w2.max())
-for a in ax:
-    a.set_ylim(y_min, y_max)
-# Show the plot
-plt.tight_layout()  # Adjust spacing between subplots
-plt.show()
-
-index = convert_to_index(w1)
-plt.plot(index)
-plt.show()
+    plt.show()
 
 
 

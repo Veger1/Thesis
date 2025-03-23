@@ -115,7 +115,7 @@ try:
         print(f"Running optimization for {cost_name}...")
         if True:  # replace with try, add exception handling
             # Solve optimization
-            t_sol, w_sol, alpha_sol, T_sol = solve_ocp(cost_expr, num_intervals, N, time, scaling)
+            t_sol, w_sol, alpha_sol, T_sol = solve_ocp(cost_expr, N, num_intervals=num_intervals)
             cost, total_cost, cost_graph, omega_axis = calc_cost(w_sol, cost_expr, t_sol)
 
             # Store results

@@ -3,7 +3,7 @@ from casadi import sum1
 from rockit import Ocp, MultipleShooting
 import sys
 from config import *
-from helper import convert_expr
+from helper import *
 
 
 def solve(obj_expr, total_points=8000, horizon=1, full_data=None, w_start = OMEGA_START):
@@ -17,6 +17,8 @@ def solve(obj_expr, total_points=8000, horizon=1, full_data=None, w_start = OMEG
     w_sol = None
     w_current, w_initial = w_start, w_start
 
+    low_torque_flag = hysteresis_filter(full_data, 0.000005, 0.000015)
+
     for i in range(total_points):
         sys.stdout.write(f"\rSolving MPC for time step {i + 1}/{total_points}")
         sys.stdout.flush()
@@ -26,7 +28,8 @@ def solve(obj_expr, total_points=8000, horizon=1, full_data=None, w_start = OMEG
         alpha = ocp.control()
         T_sc = ocp.parameter(3, grid='control')
 
-        data = full_data[:, i:i + horizon]
+        # data = full_data[:, i:i + horizon]
+        data = np.hstack([full_data[:, i:i + 1]] * horizon)
         ocp.set_value(T_sc, data)
 
         # Dynamics
@@ -45,6 +48,12 @@ def solve(obj_expr, total_points=8000, horizon=1, full_data=None, w_start = OMEG
         obj_expr_casadi = convert_expr(ocp, obj_expr, w)  # Convert to CasADi expression
         objective = ocp.integral(sum1(obj_expr_casadi))
         ocp.add_objective(objective)
+        if low_torque_flag[i]:
+            b = 1 / 700000
+            b = 1 / 70000
+            time_objective = ocp.integral(sum1(b * w ** 2))
+            ocp.add_objective(time_objective)
+
 
         # Solve
         ocp.solver('ipopt', SOLVER_OPTS)
@@ -59,7 +68,7 @@ def solve(obj_expr, total_points=8000, horizon=1, full_data=None, w_start = OMEG
         # Store results
         w_current = w_sol[1, :]
         actual_w[:, i] = w_sol[0, :]  # Wrong?
-        all_w[:, :, i] = w_sol.T  # (4, H+1)
+        all_w[:, 0:horizon+1, i] = w_sol.T  # (4, H+1)
         all_alpha[i] = alpha_sol[0]
         all_T_rw[:, i] = T_rw_sol[0, :]
 
@@ -76,6 +85,8 @@ def solve_interval(obj_expr, total_points=8000, horizon=1, interval = 1, full_da
     all_T_rw = np.zeros((4, total_points))  #  (4, N)
     w_sol = None
     w_current, w_initial = w_start, w_start
+
+    low_torque_flag = hysteresis_filter(full_data, 0.000005, 0.000015)
 
     alpha_buffer = np.zeros(interval)  # Buffer to hold control actions
     alpha_buffer_next = np.zeros(interval)
@@ -109,6 +120,11 @@ def solve_interval(obj_expr, total_points=8000, horizon=1, interval = 1, full_da
             obj_expr_casadi = convert_expr(ocp, obj_expr, w)  # Convert to CasADi expression
             objective = ocp.integral(sum1(obj_expr_casadi))
             ocp.add_objective(objective)
+            if low_torque_flag[i]:
+                b = 1 / 700000
+                # b = 1 / 70000
+                time_objective = ocp.integral(sum1(b * w ** 2))
+                ocp.add_objective(time_objective)
 
             # Solve
             ocp.solver('ipopt', SOLVER_OPTS)

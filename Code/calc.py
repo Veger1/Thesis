@@ -3,7 +3,6 @@ from Code.repeat_solver import *
 from scipy.io import savemat
 
 num_intervals, N = 8, 500
-scaling, time = 1.0, float(N/10)
 
 w, t = symbols('w t')
 k = 1.0
@@ -22,7 +21,7 @@ t_sol, w_sol, alpha_sol, T_sol = 0, 0, 0, 0
 cost, total_cost, cost_graph, omega_axis = 0, 0, 0, 0
 
 try:  # Skip this part if optimization has already been done
-    t_sol, w_sol, alpha_sol, T_sol = solve_ocp(cost_expr, num_intervals, N, time, scaling)
+    t_sol, w_sol, alpha_sol, T_sol = solve_ocp(cost_expr, N, num_intervals=num_intervals)
 except Exception as e1:
     print(f"Error: {e1}")
 

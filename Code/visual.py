@@ -7,8 +7,8 @@ from matplotlib.animation import FuncAnimation, writers
 from sympy import lambdify, symbols, sympify
 from config import *
 from helper import *
+from realtime import overlap_constraint, optimal_alpha, line_constraint, constrained_alpha
 
-full_data = load_data('Data/Slew1.mat')
 
 def load_data(dataset):  # Improve by doing the flattening/transposing here, this function
     # essentially does nothing except catching exceptions
@@ -69,16 +69,21 @@ def plot_rpm(loaded_data):
 
 def plot_radians(loaded_data):
     if 'all_w_sol' in loaded_data:
-        all_w_sol = loaded_data['all_w_sol']
-        all_t = loaded_data['all_t'].flatten()
+        all_w_sol = loaded_data['all_w_sol'].T
+        # all_t = loaded_data['all_t'].flatten()
+        all_t  = np.linspace(0, all_w_sol.shape[1]/10, all_w_sol.shape[1])
         plt.axhline(y=600, color='r', linestyle='--', label=f'rad/s=600')
         plt.axhline(y=-600, color='r', linestyle='--', label=f'rad/s=-600')
         plt.fill([all_t[0], all_t[0], all_t[-1], all_t[-1]],[-30, 30, 30, -30], 'r', alpha=0.1)
-        plt.plot(all_t, all_w_sol)
+        plt.plot(all_t, all_w_sol.T)
         # plt.ylim([-300, 300])
         plt.xlabel('Time (s)')
         plt.ylabel('Rad/s')
         plt.title('Rad/s vs Time')
+        plt.axvspan(68.9, 200.3, color='gray', alpha=0.2)
+        plt.axvspan(269, 400, color='gray', alpha=0.2)
+        plt.axvspan(510, 600, color='gray', alpha=0.2)
+        plt.axvspan(710, 800, color='gray', alpha=0.2)
         plt.show()
 
 
@@ -285,7 +290,7 @@ def plot_input(slew=1):
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
     # plt.grid()
-    plt.show()
+    # plt.show()
 
 
 def plot_a(data):
@@ -486,26 +491,129 @@ def check_diff(data1, data2):
     ax.plot(sq1)
 
 
+def plot_torque_flag(data):
+    data = data['Test'].T
+    low_torque_flag = hysteresis_filter(data, 0.000005, 0.000015)
+    binary_flags = np.array(low_torque_flag, dtype=int)
+    time = np.arange(len(binary_flags))
 
-data1 = loadmat('Data/Realtime/output.mat')
-check_momentum2(data1)
-data2 = loadmat('Data/Realtime/minmax_omega.mat')
-check_momentum(data2)
-data3 = loadmat('Data/Realtime/squared_omega.mat')
-check_momentum(data3)
-# check_diff(data1, data2)
-plt.show()
+    plt.figure(figsize=(8, 4))
+    plt.step(time, binary_flags, where="mid", label="Low Torque Flag", linewidth=2)
+    plt.scatter(time, binary_flags, color="red", zorder=3)  # Highlight transitions
+
+    # Formatting
+    plt.yticks([0, 1], ["Normal", "Low Torque"])
+    plt.xlabel("Time (Index)")
+    plt.ylabel("Torque State")
+    plt.title("Low Torque Detection Over Time")
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.legend()
+
+
+def plot_radians_with_torque_flag(loaded_data):
+    """Plots rad/s vs time and shades regions where low_torque_flag is True."""
+    if 'all_w_sol' in loaded_data:
+        # Extract wheel speeds
+        all_w_sol = loaded_data['all_w_sol'].T
+        all_t = np.linspace(0, all_w_sol.shape[0] / 10, all_w_sol.shape[0])
+
+        data = load_data('Data/Slew1.mat')
+        # Extract and process torque flag
+        data = data['Test'].T
+        low_torque_flag = hysteresis_filter(data, 0.000005, 0.000015)  # Compute flag
+        binary_flags = np.array(low_torque_flag, dtype=int)
+
+        # Plot wheel speed
+        plt.figure(figsize=(10, 5))
+        plt.plot(all_t, all_w_sol, label='Wheel Speed (rad/s)', color='b')
+
+        # Highlight threshold lines
+        plt.axhline(y=600, color='r', linestyle='--', label='Rad/s = 600')
+        plt.axhline(y=-600, color='r', linestyle='--', label='Rad/s = -600')
+
+        # Shade regions where low torque flag is True
+        for i in range(1, len(binary_flags)):
+            if binary_flags[i - 1] == 0 and binary_flags[i] == 1:  # Rising edge
+                start_time = all_t[i]
+            elif binary_flags[i - 1] == 1 and binary_flags[i] == 0:  # Falling edge
+                end_time = all_t[i]
+                plt.axvspan(start_time, end_time, color='red', alpha=0.3)
+
+        # Formatting
+        plt.xlabel('Time (s)')
+        plt.ylabel('Rad/s')
+        plt.title('Rad/s vs Time with Low Torque Regions')
+        plt.legend()
+        plt.grid(True, linestyle="--", alpha=0.6)
+        plt.show()
+
+
+def plot_method():
+    # Generate an example omega state
+    omega = np.random.uniform(-600, 600, (4, 1))
+    omega = np.array([[-100], [-60], [150], [400]])
+
+    # Compute values
+    opt_alpha_unconstrained = optimal_alpha(omega)
+    segments = line_constraint(omega)
+    overlapped_constraints = overlap_constraint(segments)
+    opt_alpha_constrained = constrained_alpha(omega)
+    optimal = np.array([opt_alpha_constrained])
+
+    # Generate alpha values for plotting the objective function
+    alpha_values = np.linspace(-OMEGA_MAX, OMEGA_MAX, 500).reshape(1,500)
+    objective_values = [(omega + np.array([1, -1, 1, -1]).reshape(4, 1) * alpha) ** 2 for alpha in alpha_values]
+    objective_values = np.sum(objective_values[0], axis=0)
+
+    # Plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(alpha_values.flatten(), objective_values, label="Objective Function (sum omega²)", color="blue")
+
+    # Mark the unconstrained optimal alpha
+    ax.axvline(opt_alpha_unconstrained, color="green", linestyle="--", label="Unconstrained Optimal α")
+
+    # Fill in constraint regions
+    for start, end in overlapped_constraints:
+        ax.axvspan(start, end, color='gray', alpha=0.3)
+    for start, end in segments:
+        ax.axvline(start, color="gray", linestyle="-.")
+        ax.axvline(end, color="gray", linestyle="-.")
+
+    # Mark the constrained optimal alpha
+    ax.axvline(optimal, color="red", linestyle="--", label="Constrained Optimal α")
+    # Labels and legend
+    ax.set_xlabel("Alpha (α)")
+    ax.set_ylabel("Objective Function Value")
+    ax.set_title("Objective Function vs. Alpha with Constraints")
+    ax.legend()
+    ax.grid()
+
+    plt.show()
+
+full_data = load_data('Data/Slew1.mat')
+data1 = loadmat('Data/Realtime/ideal.mat')
+# check_momentum2(data1)
+# data2 = loadmat('Data/Realtime/minmax_omega.mat')
+# check_momentum(data2)
+# data = loadmat('Data/Realtime/squared_omega.mat')
+# check_momentum(data3)
+# # check_diff(data1, data2)
+# plt.show()
 # plot_cost_function(data)
 # plot_cost_time(data)
 # live_cost_plot(data)
 # plot_radians(data)
 # plot_torque(data)
-# plot_a(data)
+
+# data = loadmat('Data/output.mat')
+# check_momentum2(data)
+plot_radians(data1)
+# plot_method()
+
 # plot_input(1)
+# plot_torque_flag(full_data)
 # plot_omega_squared()
 # live_plot_omega_squared(data)
 #repeat_function(live_cost_plot, 'Data/Auto/gauss_speedXtime')
-
-# plot_difference(loadmat('Data/slow1.mat'), loadmat('Data/fast1.mat'))
-
+plt.show()
 

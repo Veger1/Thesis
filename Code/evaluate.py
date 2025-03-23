@@ -114,18 +114,18 @@ def omega_squared_avg(dataset):
     return sqrd_avg
 
 
-def power(dataset):
+def energy(dataset):
     data = loadmat(dataset)
     omega, torque = data['all_w_sol'], data['all_T_sol']
     time = data['all_t'].flatten()
     t = time[2] - time[1]
-    power_result = np.zeros(4)
+    energy_result = np.zeros(4)
     for i in range(len(time)):
         for j in range(4):
             pwr = omega[i, j] * torque[i, j]
             if pwr > 0:
-                power_result[j] += pwr
-    return power_result
+                energy_result[j] += pwr
+    return energy_result
 
 
 def sum_elements(function):
@@ -244,7 +244,7 @@ def count_zero_crossings(dataset):
 
     return zero_crossings
 
-evaluation_functions = [count_zero_crossings, power, omega_squared_avg, time_stiction_accurate]
+evaluation_functions = [count_zero_crossings, energy, omega_squared_avg, time_stiction_accurate]
 zone = np.array([100, 125, 150])
 save_to_excel(evaluation_functions, 'Data/100s', 'Data/TEST.xlsx', zone)
 

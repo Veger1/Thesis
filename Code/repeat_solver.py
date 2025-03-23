@@ -4,7 +4,8 @@ import numpy as np
 from sympy import symbols, lambdify
 from config import *
 
-def solve_ocp(objective_expr, num_intervals, N, time, scaling):
+def solve_ocp(objective_expr, N, num_intervals=1, w_final=None, scaling=1):
+    time = float(N / 10)
     full_data = load_data('Data/Slew1.mat')
 
     w_initial = OMEGA_START
@@ -31,7 +32,6 @@ def solve_ocp(objective_expr, num_intervals, N, time, scaling):
         ocp.subject_to(-MAX_TORQUE <= (T_rw <= MAX_TORQUE))  # Add torque constraints
         ocp.subject_to(-OMEGA_MAX <= (w <= OMEGA_MAX))  # Add saturation constraints
         ocp.subject_to(ocp.at_t0(w) == w_initial)
-
         ocp.set_initial(w, w_initial)  # Set initial guess
 
         ocp_t = ocp.t
@@ -40,6 +40,11 @@ def solve_ocp(objective_expr, num_intervals, N, time, scaling):
         objective_expr_casadi = objective_expr_casadi(w, ocp_t)
         objective = ocp.integral(sum1(objective_expr_casadi))
         ocp.add_objective(objective)
+
+        if w_final is not None:
+            penalty_weight = 1e6  # Adjust weight based on how strict you want this
+            deviation = sum1((ocp.at_tf(w) - w_final) ** 2)  # Squared error
+            ocp.add_objective(penalty_weight * deviation)
 
         ocp.solver('ipopt', SOLVER_OPTS)  # Use IPOPT solver
         ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
@@ -132,7 +137,52 @@ def fast_solve_ocp(objective_expr, num_intervals, N, time, scaling):
 
     return all_t, all_w_sol, all_alpha_sol, all_torque_sol
 
+def solve_ocp_index(objective_expr, index, N, w_final=None, scaling=1):
+    time = float(N / 10)
+    # start_time = float(index/10)
+    full_data = load_data('Data/Slew1.mat')
 
+    w_initial = OMEGA_START
+
+    ocp = Ocp(t0=0, T=time)
+    w = ocp.state(4)
+    alpha = ocp.control()
+    T_sc = ocp.parameter(3, grid='control')
+
+    data = full_data[:, index:index+N]
+    ocp.set_value(T_sc, data)
+
+    T_rw = R_PSEUDO @ T_sc + NULL_R * scaling @ alpha
+    der_state = I_INV @ T_rw
+    ocp.set_der(w, der_state)
+
+    ocp.subject_to(-MAX_TORQUE <= (T_rw <= MAX_TORQUE))  # Add torque constraints
+    ocp.subject_to(-OMEGA_MAX <= (w <= OMEGA_MAX))  # Add saturation constraints
+    ocp.subject_to(ocp.at_t0(w) == w_initial)
+    ocp.set_initial(w, w_initial)  # Set initial guess
+
+    ocp_t = ocp.t
+    w_sym, t_sym = symbols('w t')
+    objective_expr_casadi = lambdify((w_sym, t_sym), objective_expr, 'numpy')
+    objective_expr_casadi = objective_expr_casadi(w, ocp_t)
+    objective = ocp.integral(sum1(objective_expr_casadi))
+    ocp.add_objective(objective)
+
+    if w_final is not None:
+        penalty_weight = 1e4  # Adjust weight based on how strict you want this
+        deviation = sum1((ocp.at_tf(w) - w_final) ** 2)  # Squared error
+        ocp.add_objective(penalty_weight * deviation)
+
+    ocp.solver('ipopt', SOLVER_OPTS)  # Use IPOPT solver
+    ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
+    sol = ocp.solve()  # Solve the problem
+
+    # Post-processing: Sample solutions for this interval
+    ts, w_sol = sol.sample(w, grid='control')
+    _, alpha_sol = sol.sample(alpha, grid='control')
+    _, T_rw_sol = sol.sample(T_rw, grid='control')
+
+    return w_sol, alpha_sol, T_rw_sol
 
 def calc_cost(w_sol, cost_expr, t_vals=None):
     w, t = symbols('w t')
