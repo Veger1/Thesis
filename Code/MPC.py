@@ -3,6 +3,7 @@ from casadi import sum1
 from rockit import Ocp, MultipleShooting
 import sys
 from config import *
+from helper import convert_expr
 
 
 def solve(obj_expr, total_points=8000, horizon=1, full_data=None, w_start = OMEGA_START):
@@ -41,14 +42,8 @@ def solve(obj_expr, total_points=8000, horizon=1, full_data=None, w_start = OMEG
         if i != 0:
             ocp.set_initial(w, w_sol.T)
 
-        # Objective function
-        a = 0.01
-        b = 1 / 700000
-        offset = 30
-        k = 1.0
-        time_dependent = (1 + np.tanh(k * (ocp.t - offset))) / 2
-        objective_expr_casadi = np.exp(-a * w ** 2) # + time_dependent*b * w ** 2
-        objective = ocp.integral(sum1(obj_expr))
+        obj_expr_casadi = convert_expr(ocp, obj_expr, w)  # Convert to CasADi expression
+        objective = ocp.integral(sum1(obj_expr_casadi))
         ocp.add_objective(objective)
 
         # Solve
@@ -111,7 +106,8 @@ def solve_interval(obj_expr, total_points=8000, horizon=1, interval = 1, full_da
             ocp.subject_to(ocp.at_t0(w) == w_current)
 
             # Objective function
-            objective = ocp.integral(sum1(obj_expr))
+            obj_expr_casadi = convert_expr(ocp, obj_expr, w)  # Convert to CasADi expression
+            objective = ocp.integral(sum1(obj_expr_casadi))
             ocp.add_objective(objective)
 
             # Solve

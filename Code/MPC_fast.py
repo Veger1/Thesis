@@ -38,13 +38,8 @@ def solve(obj_expr, total_points=8000, horizon=1, full_data=None, w_start = OMEG
     ocp.subject_to(ocp.at_t0(w) == w0)
     ocp.set_initial(w, w0)  # Only work for FIRST interval, does not update for subsequent intervals
 
-    # a = 0.01
-    # b = 1 / 700000
-    # offset = 60
-    # k = 1.0
-    # time_dependent = (1 + np.tanh(k * (ocp.t - offset))) / 2
-    # objective_expr_casadi = np.exp(-a * w ** 2) #+ time_dependent*b * w ** 2
-    objective = ocp.integral(sum1(obj_expr))
+    obj_expr_casadi = convert_expr(ocp, obj_expr, w)  # Convert to CasADi expression
+    objective = ocp.integral(sum1(obj_expr_casadi))
     ocp.add_objective(objective)
 
     ocp.solver('ipopt', SOLVER_OPTS)
@@ -116,9 +111,8 @@ def solve_interval(obj_expr, total_points=8000, horizon=1, interval = 1, full_da
     ocp.subject_to(ocp.at_t0(w) == w0)
     ocp.set_initial(w, w0)
 
-    a = 0.01
-    objective_expr_casadi = np.exp(-a * w ** 2)
-    objective = ocp.integral(sum1(obj_expr))
+    obj_expr_casadi = convert_expr(ocp, obj_expr, w)  # Convert to CasADi expression
+    objective = ocp.integral(sum1(obj_expr_casadi))
     ocp.add_objective(objective)
 
     ocp.solver('ipopt', SOLVER_OPTS)
