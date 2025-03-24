@@ -4,13 +4,14 @@ from scipy.io import savemat
 from sympy import symbols, exp, Abs, tanh, atan, pi
 from config import *
 from repeat_solver import solve_ocp_index
+from helper import *
 
 
 full_data = load_data('Data/Slew1.mat')  # (3, 8004)
 
 total_points = 8004
 w_current, w_initial = OMEGA_START, OMEGA_START
-w_current = np.random.uniform(-100, 100, (4, 1))
+# w_current = np.random.uniform(-100, 100, (4, 1))
 
 w_sol = np.zeros((4, total_points+1))
 torque_sol = np.zeros((4, total_points+1))
@@ -48,8 +49,8 @@ def optimal_alpha(omega):
 def line_constraint(omega):
     segments = np.zeros((4, 2))
     for i in range(4):
-        first = (omega_min - omega[i])*(-1) ** i
-        second = (-omega_min - omega[i])*(-1) ** i
+        first = (OMEGA_MIN - omega[i]) * (-1) ** i
+        second = (-OMEGA_MIN - omega[i]) * (-1) ** i
         segments[i] = np.sort([first[0], second[0]]).flatten() # Potentially sort manually
     return segments
 
@@ -161,7 +162,6 @@ def solve_ideal():
             torque_sol[:, start_idx:end_idx] = T_sol[:, :-1]
 
 
-
 def sum_squared(omega):
     return np.sum(omega**2)
 
@@ -198,7 +198,7 @@ def plot_radians(data):
     all_t = np.linspace(0, all_w_sol.shape[0] / 10, all_w_sol.shape[0])
     plt.axhline(y=600, color='r', linestyle='--', label=f'rad/s=600')
     plt.axhline(y=-600, color='r', linestyle='--', label=f'rad/s=-600')
-    plt.fill([all_t[0], all_t[0], all_t[-1], all_t[-1]], [-omega_min, omega_min, omega_min, -omega_min], 'r', alpha=0.1)
+    plt.fill([all_t[0], all_t[0], all_t[-1], all_t[-1]], [-OMEGA_MIN, OMEGA_MIN, OMEGA_MIN, -OMEGA_MIN], 'r', alpha=0.1)
     plt.plot(all_t, all_w_sol)
     # plt.ylim([-300, 300])
     plt.xlabel('Time (s)')
@@ -214,19 +214,21 @@ def plot_index(solution):
     plt.ylabel('Index')
     plt.xlabel('Point')
     plt.show()
-omega_min = 30
 
 if __name__ == "__main__":
-    solve(squared_omega)
-    w1 = w_sol.copy()
-    plot_index(w1)
+    solve()
+    repeat_ideal_omega(w_sol)
+    save('squared_omega')
+    # w1 = w_sol.copy()
     # w2 = repeat_ideal_omega(w_sol)
-    # solve_ideal()
-    w1 = w_sol.copy()
-    # save('ideal')
-    plot_radians(w1)
-
+    # fig = plt.figure()
+    # plt.plot(w1.T)
+    # fig1 = plt.figure()
+    # plt.plot(w2.T)
     plt.show()
+    full_data = load_data('Data/Slew1.mat')
+    total_momentum(full_data)
+
 
 
 

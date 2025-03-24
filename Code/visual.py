@@ -10,16 +10,6 @@ from helper import *
 from realtime import overlap_constraint, optimal_alpha, line_constraint, constrained_alpha
 
 
-def load_data(dataset):  # Improve by doing the flattening/transposing here, this function
-    # essentially does nothing except catching exceptions
-    try:
-        loaded_data = loadmat(dataset)
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
-    return loaded_data
-
-
 def plot_cost_function(loaded_data):
     if 'cost_graph' in loaded_data:
         cost_graph = loaded_data['cost_graph'].flatten()
@@ -80,10 +70,10 @@ def plot_radians(loaded_data):
         plt.xlabel('Time (s)')
         plt.ylabel('Rad/s')
         plt.title('Rad/s vs Time')
-        plt.axvspan(68.9, 200.3, color='gray', alpha=0.2)
-        plt.axvspan(269, 400, color='gray', alpha=0.2)
-        plt.axvspan(510, 600, color='gray', alpha=0.2)
-        plt.axvspan(710, 800, color='gray', alpha=0.2)
+        # plt.axvspan(68.9, 200.3, color='gray', alpha=0.2)
+        # plt.axvspan(269, 400, color='gray', alpha=0.2)
+        # plt.axvspan(510, 600, color='gray', alpha=0.2)
+        # plt.axvspan(710, 800, color='gray', alpha=0.2)
         plt.show()
 
 
@@ -547,7 +537,6 @@ def plot_radians_with_torque_flag(loaded_data):
         plt.grid(True, linestyle="--", alpha=0.6)
         plt.show()
 
-
 def plot_method():
     # Generate an example omega state
     omega = np.random.uniform(-600, 600, (4, 1))
@@ -590,30 +579,50 @@ def plot_method():
 
     plt.show()
 
-full_data = load_data('Data/Slew1.mat')
-data1 = loadmat('Data/Realtime/ideal.mat')
-# check_momentum2(data1)
-# data2 = loadmat('Data/Realtime/minmax_omega.mat')
-# check_momentum(data2)
-# data = loadmat('Data/Realtime/squared_omega.mat')
-# check_momentum(data3)
-# # check_diff(data1, data2)
-# plt.show()
-# plot_cost_function(data)
-# plot_cost_time(data)
-# live_cost_plot(data)
-# plot_radians(data)
-# plot_torque(data)
 
-# data = loadmat('Data/output.mat')
-# check_momentum2(data)
-plot_radians(data1)
-# plot_method()
+def plot_path(data):
+    # momentum3 = total_momentum(data)
+    # momentum4 = R_PSEUDO @ momentum3
+    momentum4 = pseudo_sol(data)
+    momentum3 = R @ momentum4
+    momentum5 = R_PSEUDO @ momentum3
+    solution = loadmat('Data/Realtime/squared_omega.mat')
+    ideal = solution['all_w_sol'].T
 
-# plot_input(1)
-# plot_torque_flag(full_data)
-# plot_omega_squared()
-# live_plot_omega_squared(data)
-#repeat_function(live_cost_plot, 'Data/Auto/gauss_speedXtime')
-plt.show()
+    time = np.linspace(0, 800, 8005)
+    alpha = nullspace_alpha(momentum4)
 
+    other_time = np.linspace(0, 800, 8005)
+    other_alpha = -nullspace_alpha(ideal)+alpha[0]
+
+    length = momentum4.shape[1]
+    segments = np.zeros((8, length))
+
+    for j in range(length):
+        omega = momentum4[:, j]
+        for i in range(4):
+            segments[2*i, j] = (OMEGA_MIN - omega[i]) * (-1) ** i
+            segments[1+2*i, j] = (-OMEGA_MIN - omega[i]) * (-1) ** i
+    fig, ax = plt.subplots(1, 1, figsize=(9, 6))
+    ax.plot(time, segments.T, color='gray')
+
+    ax.plot(time, alpha, color='black', linestyle='--', label='Alpha')
+    ax.plot(other_time, other_alpha, color='red', label='Alpha')
+
+    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    for i in range(0, 8, 2):
+        color = colors[i // 2 % len(colors)]  # Cycle through colors
+        plt.fill_between(time, segments[i], segments[i + 1], color=color, alpha=0.5, label=f'Band {i // 2 + 1}')
+    plt.xlabel("Time (s)")
+    plt.ylabel("Nullspace component")
+    plt.title("Gray Bands from 8xN Array")
+    plt.legend()
+
+
+if __name__ == "__main__":
+    full_data = load_data('Data/Slew1.mat')
+    plot_path(full_data)
+    # momentum = pseudo_sol(full_data)
+    # plt.plot(momentum.T)
+    # plt.ylim([-600,600])
+    plt.show()

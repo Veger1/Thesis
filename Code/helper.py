@@ -3,12 +3,11 @@ This file contains helper functions that are used in the main code.
 """
 import numpy as np
 from sympy import symbols, lambdify
-
+from config import OMEGA_START, R_PSEUDO, IRW, R
 
 
 def rpm_to_rad(rpm):
     return rpm * 2 * np.pi / 60
-
 
 def rad_to_rpm(rad):
     return rad * 60 / (2 * np.pi)
@@ -49,5 +48,27 @@ def detect_transitions(signal):
     falling_edges = np.where(diff_signal == -1)[0] + 1
 
     return rising_edges, falling_edges
+
+def pseudo_sol(data):
+    length = data.shape[1]
+    omega_sol = np.zeros((4, length + 1))
+    omega_sol[:, 0] = OMEGA_START.flatten()
+    for i in range(length):
+        omega_sol[:, i + 1] = (omega_sol[:, i].reshape((4,1)) + 0.1 * R_PSEUDO @ data[:, i].reshape(3, 1) / IRW).flatten()
+    return omega_sol
+
+def total_momentum(data):
+    omega_sol = pseudo_sol(data)
+    momentum = R @ omega_sol
+    return momentum
+
+def nullspace_alpha(data):
+    length = data.shape[1]
+    alpha = np.zeros(length)
+    for i in range(length):
+        alpha[i] = (- data[0, i] + data[1, i] - data[2, i] + data[3, i]) / 4
+    return alpha
+
+
 
 
