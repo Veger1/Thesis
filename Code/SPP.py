@@ -153,115 +153,65 @@ def find_all_equal_shortest_paths(adjacency):
 
     return all_paths
 
-def stitch_sections(all_equal_paths, start_idx, transition_costs, final_costs):
-    num_sections = len(all_equal_paths)
-    goal_node = 'goal'
-
-    # Initial meta-graph connections
-    meta_adj = {}
-    found_first_paths = False
-
-    # SECTION 0 — Only paths starting from start_idx
-    for (s_idx, e_idx), path_list in all_equal_paths[0].items():
-        if s_idx == start_idx:
-            for cost, path in path_list:
-                meta_adj[(f'section_0', e_idx)] = {'cost': cost, 'path': path}
-                found_first_paths = True
-
-    if not found_first_paths:
-        print(f"[ERROR] No paths found starting from node {start_idx} in section 0.")
-        return None
-
-    # INTERMEDIATE SECTIONS
-    for k in range(1, num_sections):
-        current_paths = all_equal_paths[k]
-        next_meta_adj = {}
-
-        for (prev_sec, prev_end_idx), data in meta_adj.items():
-            if not prev_sec.startswith(f'section_{k-1}'):
-                continue
-            for (s_idx, e_idx), path_list in current_paths.items():
-                if s_idx != prev_end_idx:
-                    continue
-                for cost, path in path_list:
-                    total_cost = data['cost'] + transition_costs[k-1][s_idx] + cost
-                    new_path = data['path'] + path[1:]  # skip repeated node
-                    next_meta_adj[(f'section_{k}', e_idx)] = {
-                        'cost': total_cost,
-                        'path': new_path
-                    }
-
-        if not next_meta_adj:
-            print(f"[ERROR] No valid transitions from section {k-1} to {k}.")
-            return None
-
-        meta_adj = next_meta_adj
-
-    # FINAL STEP: Connect to goal
-    final_paths = {}
-    for (sec_name, end_idx), data in meta_adj.items():
-        total_cost = data['cost'] + final_costs[end_idx]
-        final_paths[(sec_name, end_idx)] = {
-            'cost': total_cost,
-            'path': data['path'] + [goal_node]
-        }
-
-    if not final_paths:
-        print("[ERROR] No valid final connections to goal.")
-        return None
-
-    # Choose shortest global path
-    best = min(final_paths.values(), key=lambda x: x['cost'])
-    return best
-
-def visualize_paths(all_paths, num_solutions):
+def create_graph(all_paths, vibr_cost):
     G = nx.DiGraph()  # Directed graph
     position = {}  # To store positions of nodes for visualization
     edge_labels = {}  # To store edge labels (costs)
     added_nodes = set()  # Track added nodes
 
-    # Nodes and edges for each solution
-    solution_counter = 1
+    goal_node = "Goal"
+    G.add_node(goal_node)
+    position[goal_node] = (len(all_paths) * 3 + 1, 0)
     solution_nodes = []  # To track the nodes of each solution
-    for (start_idx, end_idx), paths in all_paths.items():
+    for solution in range(len(all_paths)):
+        for (start_idx, end_idx), paths in all_paths[solution].items():
 
-        for path in paths:
-            cost, path_nodes = path
-            solution_name = f"Solution {solution_counter}"
+            for path in paths:
+                cost, path_nodes = path
+                solution_name = f"({solution})"
 
-            # Add nodes for the solution
-            start_node = f"{solution_name} start ({start_idx})"
-            end_node = f"{solution_name} end ({end_idx})"
-            if start_node not in added_nodes:
-                G.add_node(start_node)
-                added_nodes.add(start_node)
-                position[start_node] = (0, start_idx)
-            if end_node not in added_nodes:
-                G.add_node(end_node)
-                added_nodes.add(end_node)
-                position[end_node] = (1, end_idx)
+                # Add nodes for the solution
+                start_node = f"{solution_name} + ({start_idx})"
+                end_node = f"{solution_name} - ({end_idx})"
+                if start_node not in added_nodes:
+                    G.add_node(start_node)
+                    added_nodes.add(start_node)
+                    position[start_node] = (solution*3, start_idx)
+                if end_node not in added_nodes:
+                    G.add_node(end_node)
+                    added_nodes.add(end_node)
+                    position[end_node] = (solution*3 + 2, end_idx)
 
+                    next_solution_name = f"({solution + 1})"
+                    next_start_node = f"{next_solution_name} + ({end_idx})"
+                    G.add_node(next_start_node)
+                    added_nodes.add(next_start_node)
+                    position[next_start_node] = ((solution+1)*3, end_idx)
 
-            # Add edges (start to end in the same solution)
-            G.add_edge(start_node, end_node, weight=cost)
-            edge_labels[(start_node, end_node)] = cost
+                    weight = vibr_cost[solution][end_idx]
+                    G.add_edge(end_node, next_start_node, weight=weight)
+                    edge_labels[(end_node, next_start_node)] = weight
 
-            solution_nodes.append((start_node, end_node))
-
-            # Transition edges between solutions
-            if solution_counter < num_solutions:
-                next_solution_name = f"Solution {solution_counter + 1}"
-                next_start_node = f"{next_solution_name} start ({start_idx})"
-                G.add_edge(end_node, next_start_node, weight=cost)
-                edge_labels[(end_node, next_start_node)] = cost
-
-                solution_counter += 1
+                    if solution == len(all_paths) - 1:
+                        G.add_edge(next_start_node, "Goal", weight=0)
+                        edge_labels[(next_start_node, "Goal")] = 0
 
 
-    # Draw the graph
+                # Add edges (start to end in the same solution)
+                G.add_edge(start_node, end_node, weight=cost)
+                edge_labels[(start_node, end_node)] = cost
+
+                solution_nodes.append((start_node, end_node))
+    return G, position, edge_labels, solution_nodes
+
+def visualize_paths(G, position, edge_labels, path=None):
     plt.figure(figsize=(12, 6))
-    nx.draw(G, pos=position, with_labels=True, node_size=2000, node_color='skyblue', font_size=10, font_weight='bold', arrows=True)
-    nx.draw_networkx_edge_labels(G, pos=position, edge_labels=edge_labels, label_pos=0.15)
+    nx.draw(G, pos=position, with_labels=True, node_size=1000, node_color='skyblue', font_size=6, font_weight='bold', arrows=True)
+    if path is not None:
+        path_edges = list(zip(path, path[1:]))
+        nx.draw_networkx_nodes(G, pos=position, nodelist=shortest_path, node_color='lightgreen', node_size=1000)
+        nx.draw_networkx_edges(G, pos=position, edgelist=path_edges, edge_color='red', width=2)
+    nx.draw_networkx_edge_labels(G, pos=position, edge_labels=edge_labels, label_pos=0.5)
 
     plt.title("Shortest Path Problem with Multiple Solutions")
     # plt.show()
@@ -361,11 +311,10 @@ for k in range(len(sections)):
 
     # all_paths = find_all_shortest_paths_from_adjacency(adj)
     equal_paths = find_all_equal_shortest_paths(adj)
-    pprint(equal_paths)
+    # pprint(equal_paths)
 
-    plot(scatter=True)
-    visualize_paths(equal_paths, 1)
-    plt.show()
+    # plot(scatter=True)
+    # plt.show()
 
     all_options.append(options)
     all_indices.append(full_indices)
@@ -373,25 +322,24 @@ for k in range(len(sections)):
     all_adj.append(adj)
     all_equal_paths.append(equal_paths)
 
-
-# Example values
-start_idx = 0
-transition_costs = [
-    [1, 10, 10, 10, 100],  # From section 0 to 1
-    [1, 10, 10, 10, 100],  # From section 1 to 2
-    [1, 10, 10, 10, 100],  # From section 2 to 3
+vibration_cost = [  # Calculate vibration cost for each solution
+    [1, 10, 10, 10, 100],
+    [25, 20, 30, 40, 100],
+    [30, 30, 40, 10, 100],
+    [100, 10, 10, 10, 100]
 ]
-final_costs = [2, 200, 200, 200, 200]  # From section 3 to goal
+plot(scatter=False)
+graph, positions, labels, nodes = create_graph(all_equal_paths, vibration_cost)
+shortest_path = nx.dijkstra_path(graph, source='(0) + (0)', target='Goal', weight='weight')
+print("Path to goal:", shortest_path)
+visualize_paths(graph, positions, labels, path=shortest_path)
+plt.show()
 
-result = stitch_sections(all_equal_paths, start_idx, transition_costs, final_costs)
 
-print("Total cost:", result['cost'])
-print("Full stitched path:")
-for node in result['path']:
-    print(node)
+
 
 new_time = clock.time()
-print("Time taken: ", new_time - old_time)
+print("Time taken: ", new_time - old_time, "seconds")
 
 
 
