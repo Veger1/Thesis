@@ -7,9 +7,6 @@ import matplotlib.pyplot as plt
 from rockit import Ocp, MultipleShooting
 
 
-def smooth_max(a, b, epsilon=10):
-    return (1 / epsilon) * ca.log(ca.exp(epsilon * a) + ca.exp(epsilon * b))
-
 def alpha_options(part,omega_input, reference=0):
     all_alphas = []
     for j in range(len(part)):
@@ -83,6 +80,18 @@ def compute_constraints(wheel_signs_before, wheel_signs_after, bands, position=0
 
 
     return min_constraints, max_constraints, crossings_min, crossings_max
+
+def find_crossings(signals):
+    num_signals, N = signals.shape
+    crossings = {}
+
+    for i in range(num_signals):
+        for j in range(i+1, num_signals):
+            diff = signals[i] - signals[j]
+            crossing_indices = np.where(np.diff(np.sign(diff)) != 0)[0]
+            crossings[(i, j)] = crossing_indices
+
+    return crossings
 
 def optimize_variable(x_start, x_end, x_min0, x_max0, x_target, zone_min, zone_max):
     if np.any(x_min0 > x_max0):
@@ -179,7 +188,7 @@ def rockit_optimize(x_start, x_end, x_min0, x_max0, x_target, zone_min, zone_max
 
 def plot(n0=0, n=8005, path=None, scatter=True, limits=True, optimal=False):
     fig, ax = plt.subplots(1, 1, figsize=(9, 6))
-    ax.plot(time, segments.T, color='gray')
+    # ax.plot(time, segments.T, color='gray')
 
     ax.plot(time, alpha, color='black', linestyle='--', label='Ideal path')
     if scatter:
@@ -190,6 +199,8 @@ def plot(n0=0, n=8005, path=None, scatter=True, limits=True, optimal=False):
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
     for i in range(0, 8, 2):
         color = colors[i // 2 % len(colors)]  # Cycle through colors
+        avg = (segments[i] + segments[i + 1]) / 2
+        plt.plot(time, avg, color=color)
         plt.fill_between(time, segments[i], segments[i + 1], color=color, alpha=0.5, label=f'Band {i // 2 + 1}')
     if limits:
         plt.plot(time[n0:n0+n], max_constraint, color='black', linestyle='--', label='Max Constraint')
@@ -199,10 +210,10 @@ def plot(n0=0, n=8005, path=None, scatter=True, limits=True, optimal=False):
     plt.xlabel("Time (s)")
     plt.ylabel("Nullspace component")
     plt.title("Zero speed bands vs time")
-    # plt.legend()
+    plt.legend()
     plt.show()
 
-data = load_data('Data/Slew2.mat')
+data = load_data('Data/Slew1.mat')
 low_torque_flag = hysteresis_filter(data, 0.000005, 0.000015)
 low_torque_flag[0:2] = False
 rising, falling = detect_transitions(low_torque_flag)
@@ -215,14 +226,17 @@ else:
     print("Error: rising and falling edges do not match")
     print(rising, falling)
     exit()
-momentum4 = pseudo_sol(data)
-momentum3 = R @ momentum4
-momentum0 = R_PSEUDO @ momentum3
+momentum4_with_nullspace = pseudo_sol(data)
+momentum3 = R @ momentum4_with_nullspace
+alpha_nullspace = nullspace_alpha(momentum4_with_nullspace[:,0:1])
+momentum4 = R_PSEUDO @ momentum3
 
 time = np.linspace(0, 800, 8005)
-alpha = nullspace_alpha(momentum4)
-begin_alphas = alpha_options(falling, momentum4, reference=alpha[0])
-end_alphas = alpha_options(rising, momentum4, reference=alpha[0])
+# alpha = nullspace_alpha(momentum4)
+alpha, alpha_ref = np.zeros_like(time, dtype=int), 0
+
+begin_alphas = alpha_options(falling, momentum4, reference=alpha_ref)
+end_alphas = alpha_options(rising, momentum4, reference=alpha_ref)
 
 begin_signs = alpha_to_sign(begin_alphas, momentum4, falling)
 end_signs = alpha_to_sign(end_alphas, momentum4, rising)
@@ -248,5 +262,5 @@ for k in range(len(begin_alphas)):
         for j in range(len(end_alphas[k])):
             constrained_segments = segments[:, begin:begin+size]
             min_constraint, max_constraint, crossing_min, crossing_max = compute_constraints(begin_signs[k][i], end_signs[k][j], constrained_segments, position=begin_alphas[k][i])
-            x_opt = rockit_optimize(begin_alphas[k][i], end_alphas[k][j], min_constraint, max_constraint, alpha[0], crossing_min, crossing_max)
+            x_opt = rockit_optimize(begin_alphas[k][i], end_alphas[k][j], min_constraint, max_constraint, alpha_ref, crossing_min, crossing_max)
             plot(begin, size, path=x_opt)

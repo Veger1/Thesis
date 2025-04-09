@@ -281,9 +281,10 @@ low_torque_flag[0:2] = False
 rising, falling = detect_transitions(low_torque_flag)
 falling = np.insert(falling, 0, 0)
 
-momentum4 = pseudo_sol(torque_data)
-momentum3 = R @ momentum4
-momentum0 = R_PSEUDO @ momentum3
+momentum4_with_nullspace = pseudo_sol(torque_data)
+alpha_nullspace = nullspace_alpha(momentum4_with_nullspace[:,0:1])
+momentum3 = R @ momentum4_with_nullspace
+momentum4 = R_PSEUDO @ momentum3
 sections = []
 if len(rising) == len(falling):
     for i in range(len(rising)):
@@ -294,7 +295,8 @@ else:
     exit()
 
 time = np.linspace(0, 800, 8005)
-alpha = nullspace_alpha(momentum4)
+# alpha = nullspace_alpha(momentum4)
+alpha, alpha_ref = np.zeros_like(time, dtype=int), 0
 
 segments = calc_segments(momentum4)
 all_options = []
@@ -304,7 +306,7 @@ all_adj = []
 all_equal_paths = []
 
 for k in range(len(sections)):
-    options = alpha_options(sections[k],alpha[0])
+    options = alpha_options(sections[k],alpha_ref)
     full_indices = calc_indices(options)
     signs = alpha_to_sign(options, sections[k], full_indices)
     adj = build_adjacency_dict(signs)
