@@ -2,7 +2,6 @@ import numpy as np
 import casadi as ca
 from config import *
 from helper import *
-from scipy.io import loadmat
 import matplotlib.pyplot as plt
 from rockit import Ocp, MultipleShooting
 import heapq
@@ -153,68 +152,331 @@ def find_all_equal_shortest_paths(adjacency):
 
     return all_paths
 
-def create_graph(all_paths, vibr_cost):
-    G = nx.DiGraph()  # Directed graph
-    position = {}  # To store positions of nodes for visualization
-    edge_labels = {}  # To store edge labels (costs)
-    added_nodes = set()  # Track added nodes
 
+def create_graph2(all_paths, alpha_first, alpha_second, all_signs):
+    G = nx.DiGraph()
+    positions = {}  # For visualization purposes
+    edge_labels = {}  # To store edge labels (costs)
+
+    # Process each solution.
+    for sol in range(len(all_paths)):
+        sol_dict = all_paths[sol]
+        for (begin_idx, end_idx), paths_list in sol_dict.items():
+            # Use the first available cost; the actual path is ignored.
+            cost, _ = paths_list[0]
+
+            # Define unique node names.
+            begin_node = f"{sol}_b_{begin_idx}"
+            end_node = f"{sol}_e_{end_idx}"
+
+            # Add the begin node with its alpha and sign.
+            if begin_node not in G:
+                try:
+                    a_val = alpha_first[sol][begin_idx]
+                except IndexError:
+                    a_val = None
+                try:
+                    sign_value = all_signs[sol][0][begin_idx]
+                except IndexError:
+                    sign_value = None
+                G.add_node(begin_node, alpha=a_val, sign=sign_value, type='begin')
+                # Position: x is based on the solution number, y is based on the index.
+                positions[begin_node] = (sol * 3, begin_idx)
+
+            # Add the end node with its alpha and sign.
+            if end_node not in G:
+                try:
+                    a_val = alpha_second[sol][end_idx]
+                except IndexError:
+                    a_val = None
+                try:
+                    sign_value = all_signs[sol][-1][end_idx]
+                except IndexError:
+                    sign_value = None
+                G.add_node(end_node, alpha=a_val, sign=sign_value, type='end')
+                positions[end_node] = (sol * 3 + 2, end_idx)
+
+            # Connect the begin node to the end node within the solution.
+            G.add_edge(begin_node, end_node, weight=cost)
+            edge_labels[(begin_node, end_node)] = cost
+
+    # Link solutions by connecting end nodes in sol to begin nodes in sol+1 if they have matching sign vectors.
+    for sol in range(len(all_paths) - 1):
+        # Collect end nodes from current solution.
+        end_nodes = [node for node, attr in G.nodes(data=True)
+                     if node.startswith(f"{sol}_") and attr.get('type') == 'end']
+        # Collect begin nodes from next solution.
+        next_begin_nodes = [node for node, attr in G.nodes(data=True)
+                            if node.startswith(f"{sol + 1}_") and attr.get('type') == 'begin']
+
+        # For each end node and each begin node in the next solution, check the sign vectors.
+        for en in end_nodes:
+            sign_en = G.nodes[en].get('sign')
+            for bn in next_begin_nodes:
+                sign_bn = G.nodes[bn].get('sign')
+                if sign_en is not None and sign_bn is not None:
+                    # If sign vectors match exactly, create an edge.
+                    if count_sign_changes(sign_en, sign_bn) == 0:
+                        # Here, instead of a linking cost of 0, we take the alpha from the begin node (next solution).
+                        linking_cost = G.nodes[bn].get('alpha')
+                        G.add_edge(en, bn, weight=linking_cost)
+                        edge_labels[(en, bn)] = linking_cost
+
+    # Create the "Goal" node and attach it to every end node of the last solution.
     goal_node = "Goal"
     G.add_node(goal_node)
-    position[goal_node] = (len(all_paths) * 3 + 1, 0)
-    solution_nodes = []  # To track the nodes of each solution
-    for solution in range(len(all_paths)):
-        for (start_idx, end_idx), paths in all_paths[solution].items():
+    last_sol = len(all_paths) - 1
+    last_end_nodes = [node for node, attr in G.nodes(data=True)
+                      if node.startswith(f"{last_sol}_") and attr.get('type') == 'end']
+    for node in last_end_nodes:
+        G.add_edge(node, goal_node, weight=0)
+        edge_labels[(node, goal_node)] = 0
+        positions[goal_node] = (len(all_paths) * 3 + 2, 0)
 
-            for path in paths:
-                cost, path_nodes = path
-                solution_name = f"({solution})"
-
-                # Add nodes for the solution
-                start_node = f"{solution_name} + ({start_idx})"
-                end_node = f"{solution_name} - ({end_idx})"
-                if start_node not in added_nodes:
-                    G.add_node(start_node)
-                    added_nodes.add(start_node)
-                    position[start_node] = (solution*3, start_idx)
-                if end_node not in added_nodes:
-                    G.add_node(end_node)
-                    added_nodes.add(end_node)
-                    position[end_node] = (solution*3 + 2, end_idx)
-
-                    next_solution_name = f"({solution + 1})"
-                    next_start_node = f"{next_solution_name} + ({end_idx})"
-                    G.add_node(next_start_node)
-                    added_nodes.add(next_start_node)
-                    position[next_start_node] = ((solution+1)*3, end_idx)
-
-                    weight = vibr_cost[solution][end_idx]
-                    G.add_edge(end_node, next_start_node, weight=weight)
-                    edge_labels[(end_node, next_start_node)] = weight
-
-                    if solution == len(all_paths) - 1:
-                        G.add_edge(next_start_node, "Goal", weight=0)
-                        edge_labels[(next_start_node, "Goal")] = 0
+    return G, positions, edge_labels, None
 
 
-                # Add edges (start to end in the same solution)
-                G.add_edge(start_node, end_node, weight=cost)
-                edge_labels[(start_node, end_node)] = cost
+def create_graph(all_paths, alpha_first, alpha_second, all_signs, dummy_alpha):
+    """
+    Constructs a directed graph based on solution dictionaries, then appends
+    a dummy transition layer before reaching the final goal.
 
-                solution_nodes.append((start_node, end_node))
-    return G, position, edge_labels, solution_nodes
+    Parameters:
+      all_paths: list of dictionaries (one per real solution). Each dictionary
+                 has keys (begin_idx, end_idx) mapping to lists of tuples (cost, path).
+      alpha_first: list of lists; alpha_first[sol][i] is the alpha of the i-th beginning node in solution sol.
+      alpha_second: list of lists; alpha_second[sol][j] is the alpha of the j-th ending node in solution sol.
+      all_signs: list of sign layers. For each solution sol (0 to N-1):
+                   - all_signs[sol][0] gives the sign vectors for the beginning nodes.
+                   - all_signs[sol][-1] gives the sign vectors for the ending nodes.
+                 The last element, all_signs[-1], is the dummy layer sign vectors (one per dummy node).
+      dummy_alpha: list; dummy_alpha[i] is the alpha for the i-th dummy node.
+
+    Returns:
+      G: The resulting directed graph.
+      positions: Dictionary mapping nodes to positions (for visualization).
+      edge_labels: Dictionary mapping edge tuples to their weight.
+    """
+    G = nx.DiGraph()
+    positions = {}
+    edge_labels = {}
+
+    num_real_sols = len(all_signs) - 1  # Last entry is for the dummy layer.
+
+    # ---------------------------------------------------
+    # Step 1: Create nodes for each real solution from sign layers.
+    # ---------------------------------------------------
+    for sol in range(num_real_sols):
+        # Create begin nodes from the first layer.
+        begin_signs = all_signs[sol][0]
+        for i, sign in enumerate(begin_signs):
+            node_name = f"{sol}_b_{i}"
+            alpha_val = alpha_first[sol][i] if i < len(alpha_first[sol]) else None
+            G.add_node(node_name, alpha=alpha_val, sign=sign, type='begin')
+            positions[node_name] = (sol * 3, i)
+
+        # Create end nodes from the last layer.
+        end_signs = all_signs[sol][-1]
+        for j, sign in enumerate(end_signs):
+            node_name = f"{sol}_e_{j}"
+            alpha_val = alpha_second[sol][j] if j < len(alpha_second[sol]) else None
+            G.add_node(node_name, alpha=alpha_val, sign=sign, type='end')
+            positions[node_name] = (sol * 3 + 2, j)
+
+    # ---------------------------------------------------
+    # Step 2: Add internal solution edges (begin -> end) from all_paths.
+    # ---------------------------------------------------
+    for sol, sol_dict in enumerate(all_paths):
+        for (begin_idx, end_idx), paths_list in sol_dict.items():
+            cost, _ = paths_list[0]  # Only use the cost from the first path.
+            begin_node = f"{sol}_b_{begin_idx}"
+            end_node = f"{sol}_e_{end_idx}"
+            G.add_edge(begin_node, end_node, weight=cost)
+            edge_labels[(begin_node, end_node)] = cost
+
+    # ---------------------------------------------------
+    # Step 3: Add transitions between consecutive real solutions.
+    # ---------------------------------------------------
+    for sol in range(num_real_sols - 1):
+        num_end_nodes = len(all_signs[sol][-1])
+        num_begin_nodes_next = len(all_signs[sol + 1][0])
+        for j in range(num_end_nodes):
+            en = f"{sol}_e_{j}"
+            sign_en = G.nodes[en]['sign']
+            for i in range(num_begin_nodes_next):
+                bn = f"{sol + 1}_b_{i}"
+                sign_bn = G.nodes[bn]['sign']
+                if count_sign_changes(sign_en, sign_bn) == 0:
+                    # Transition edge cost: use alpha from the beginning node in the next solution.
+                    linking_cost = G.nodes[bn]['alpha']
+                    G.add_edge(en, bn, weight=linking_cost)
+                    edge_labels[(en, bn)] = linking_cost
+
+    # ---------------------------------------------------
+    # Step 4: Create dummy layer nodes from dummy signs (all_signs[-1])
+    # ---------------------------------------------------
+    dummy_signs = all_signs[-1]  # This is a list of sign vectors (one per dummy node)
+    num_dummy = len(dummy_signs)
+    for i, sign in enumerate(dummy_signs):
+        node_name = f"dummy_{i}"
+        # Use the provided dummy_alpha for the cost.
+        alpha_val = dummy_alpha[i] if i < len(dummy_alpha) else None
+        G.add_node(node_name, alpha=alpha_val, sign=sign, type='dummy')
+        # Place dummy nodes to the right of the last solution.
+        positions[node_name] = (num_real_sols * 3, i)
+
+    # ---------------------------------------------------
+    # Step 5: Add transitions from the last real solution's end nodes to dummy nodes.
+    # ---------------------------------------------------
+    last_sol = num_real_sols - 1
+    num_end_last = len(all_signs[last_sol][-1])
+    for j in range(num_end_last):
+        en = f"{last_sol}_e_{j}"
+        sign_en = G.nodes[en]['sign']
+        for i in range(num_dummy):
+            dummy_node = f"dummy_{i}"
+            sign_dummy = G.nodes[dummy_node]['sign']
+            if count_sign_changes(sign_en, sign_dummy) == 0:
+                # Transition cost taken from the dummy node's alpha.
+                linking_cost = G.nodes[dummy_node]['alpha']
+                G.add_edge(en, dummy_node, weight=linking_cost)
+                edge_labels[(en, dummy_node)] = linking_cost
+
+    # ---------------------------------------------------
+    # Step 6: Connect dummy nodes to the final "Goal" node.
+    # ---------------------------------------------------
+    goal_node = "Goal"
+    G.add_node(goal_node)
+    # Option 1: Use the dummy alpha as the cost for the edge to goal.
+    # (This provides a transition cost also from the dummy layer to the goal.)
+    for i in range(num_dummy):
+        dummy_node = f"dummy_{i}"
+        linking_cost = G.nodes[dummy_node]['alpha']
+        G.add_edge(dummy_node, goal_node, weight=0)
+        edge_labels[(dummy_node, goal_node)] = 0
+        positions[goal_node] = (len(all_paths) * 3 + 2, 0)
+
+    return G, positions, edge_labels, 0
+
+def create_graph_(all_paths, alpha_first, alpha_second, all_signs):
+    G = nx.DiGraph()
+    positions = {}
+    edge_labels = {}
+
+    num_solutions = len(all_signs)
+
+    # -------------------------
+    # Step 1: Create Nodes based on all_signs
+    # -------------------------
+    for sol in range(num_solutions):
+        # Create begin nodes based on the first layer of signs
+        begin_signs = all_signs[sol][0]
+        for i, sign in enumerate(begin_signs):
+            node_name = f"{sol}_b_{i}"
+            G.add_node(node_name,
+                       alpha=alpha_first[sol][i] if i < len(alpha_first[sol]) else None,
+                       sign=sign,
+                       type='begin')
+            # Position: x based on sol (shifted by multiple) and y = index
+            positions[node_name] = (sol * 3, i)
+
+        # Create end nodes based on the last layer of signs
+        end_signs = all_signs[sol][-1]
+        for j, sign in enumerate(end_signs):
+            node_name = f"{sol}_e_{j}"
+            G.add_node(node_name,
+                       alpha=alpha_second[sol][j] if j < len(alpha_second[sol]) else None,
+                       sign=sign,
+                       type='end')
+            positions[node_name] = (sol * 3 + 2, j)
+
+    # -------------------------
+    # Step 2: Add Internal Solution Edges (from begin to end in the same solution)
+    # -------------------------
+    for sol, sol_dict in enumerate(all_paths):
+        # For each entry with key (begin_idx, end_idx) add an edge with the cost.
+        for (begin_idx, end_idx), paths_list in sol_dict.items():
+            # Use the cost from the first available tuple.
+            cost, _ = paths_list[0]
+            begin_node = f"{sol}_b_{begin_idx}"
+            end_node = f"{sol}_e_{end_idx}"
+            G.add_edge(begin_node, end_node, weight=cost)
+            edge_labels[(begin_node, end_node)] = cost
+
+    # -------------------------
+    # Step 3: Add Transitions between consecutive solutions based on sign matching.
+    # -------------------------
+    for sol in range(num_solutions - 1):
+        # For each end node in the current solution, and each begin node in the next solution:
+        num_end_nodes = len(all_signs[sol][-1])
+        num_begin_nodes_next = len(all_signs[sol + 1][0])
+        for j in range(num_end_nodes):
+            en = f"{sol}_e_{j}"
+            sign_en = G.nodes[en].get('sign')
+            for i in range(num_begin_nodes_next):
+                bn = f"{sol + 1}_b_{i}"
+                sign_bn = G.nodes[bn].get('sign')
+                if sign_en is not None and sign_bn is not None:
+                    if count_sign_changes(sign_en, sign_bn) == 0:
+                        # Use the alpha from the begin node of solution sol+1
+                        linking_cost = G.nodes[bn].get('alpha')
+                        G.add_edge(en, bn, weight=linking_cost)
+                        edge_labels[(en, bn)] = linking_cost
+
+    # -------------------------
+    # Step 4: Add a final Goal node and link every end node from the last solution to it.
+    # -------------------------
+    goal_node = "Goal"
+    G.add_node(goal_node)
+    last_sol = num_solutions - 1
+    num_end_last = len(all_signs[last_sol][-1])
+    for j in range(num_end_last):
+        node = f"{last_sol}_e_{j}"
+        G.add_edge(node, goal_node, weight=0)
+        edge_labels[(node, goal_node)] = 0
+        positions[goal_node] = (len(all_paths) * 3 + 2, 0)
+
+    return G, positions, edge_labels, _
 
 def visualize_paths(G, position, edge_labels, path=None):
     plt.figure(figsize=(12, 6))
     nx.draw(G, pos=position, with_labels=True, node_size=1000, node_color='skyblue', font_size=6, font_weight='bold', arrows=True)
     if path is not None:
         path_edges = list(zip(path, path[1:]))
-        nx.draw_networkx_nodes(G, pos=position, nodelist=shortest_path, node_color='lightgreen', node_size=1000)
+        nx.draw_networkx_nodes(G, pos=position, nodelist=path, node_color='lightgreen', node_size=1000)
         nx.draw_networkx_edges(G, pos=position, edgelist=path_edges, edge_color='red', width=2)
     nx.draw_networkx_edge_labels(G, pos=position, edge_labels=edge_labels, label_pos=0.5)
 
     plt.title("Shortest Path Problem with Multiple Solutions")
     # plt.show()
+
+def calc_cost(index1, index2, omega_input, reference=0):
+    alpha_begin = []
+    alpha_end = []
+    cost_begin = []
+    cost_end = []
+    for i in range(len(index1)):
+        result = alpha_options(omega_input[:, index1[i]].reshape(4,1), reference)[0] # Check
+        # alpha_begin.append(f"{index1[i]}")
+        alpha_begin.append(result)
+        cost = []
+        for j in range(len(result)):
+            step1 = omega_input[:, index1[i]].reshape(4, 1) - NULL_R * result[j]
+            sum_omega_square1 = np.sum( step1 ** 2)
+            cost.append(sum_omega_square1)
+        cost_begin.append(cost)
+
+    for i in range(len(index2)):
+        result = alpha_options(omega_input[:, index2[i]].reshape(4,1),reference)[0]
+        # alpha_begin.append(f"{index1[i]}")
+        alpha_end.append(result)
+        cost = []
+        for j in range(len(result)):
+            step1 = omega_input[:, index1[i]].reshape(4, 1) - NULL_R * result[j]
+            sum_omega_square1 = np.sum(step1 ** 2)
+            cost.append(sum_omega_square1)
+        cost_end.append(cost)
+    return alpha_begin, alpha_end, cost_begin, cost_end
 
 def compute_constraints(wheel_signs_before, wheel_signs_after, bands, position=0):
     N = bands.shape[1]
@@ -297,6 +559,7 @@ else:
 time = np.linspace(0, 800, 8005)
 # alpha = nullspace_alpha(momentum4)
 alpha, alpha_ref = np.zeros_like(time, dtype=int), 0
+alpha_rising, alpha_falling, cost_rising, cost_falling = calc_cost(rising, falling, momentum4, reference=alpha_ref)
 
 segments = calc_segments(momentum4)
 all_options = []
@@ -317,24 +580,25 @@ for k in range(len(sections)):
 
     # plot(scatter=True)
     # plt.show()
-
     all_options.append(options)
     all_indices.append(full_indices)
     all_signs.append(signs)
     all_adj.append(adj)
     all_equal_paths.append(equal_paths)
 
-vibration_cost = [  # Calculate vibration cost for each solution
-    [1, 10, 10, 10, 100],
-    [25, 20, 30, 40, 100],
-    [30, 30, 40, 10, 100],
-    [100, 10, 10, 10, 100]
-]
+options = alpha_options(momentum4[:,-1].reshape(4,1),alpha_ref)
+alpha_end = options[0]
+signs = alpha_to_sign(options, momentum4[:,-1].reshape(4,1), [0])
+print(signs)
+all_signs.append(signs[0])
+
 plot(scatter=False)
-graph, positions, labels, nodes = create_graph(all_equal_paths, vibration_cost)
-shortest_path = nx.dijkstra_path(graph, source='(0) + (0)', target='Goal', weight='weight')
-print("Path to goal:", shortest_path)
+graph, positions, labels, nodes = create_graph(all_equal_paths, alpha_falling, alpha_rising, all_signs, alpha_end)
+shortest_path = nx.dijkstra_path(graph, source='0_b_0', target='Goal', weight='weight')
+# print("Path to goal:", shortest_path)
 visualize_paths(graph, positions, labels, path=shortest_path)
+# visualize_paths(graph, positions, labels)
+
 plt.show()
 
 
