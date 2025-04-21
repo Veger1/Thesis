@@ -1,8 +1,11 @@
+from rockit import Ocp, MultipleShooting
+from casadi import sum1
 from config import *
 from helper import *
 import networkx as nx
 import matplotlib.pyplot as plt
 from itertools import islice
+
 
 def calc_segments(omega_input):
     length = omega_input.shape[1]
@@ -148,7 +151,7 @@ def k_shortest_paths(G, source_idx, target_idx, k, cost_type="sign_cost"):
     all_paths = sorted(all_paths, key=lambda x: x[1])[:k]
     return all_paths
 
-def assign_mixed_costs(G, penalty=10000):
+def assign_mixed_costs(G, penalty=0):
     for u, v, data in G.edges(data=True):
         temp_sign_cost = data.get("sign_cost", 0)
         temp_vibration_cost = data.get("vibration_cost", 0)
@@ -209,8 +212,7 @@ def extract_info_from_path(graph, path):
     # Handle the last node specially
     last_node = path[-1]
     last_data = graph.nodes[last_node].get('node')
-    print("used node:", last_node)
-    if last_data is None and len(path) >= 2:
+    if last_data is None and len(path) >= 2:  # USeless code maybe
         print("Used")
         # If last is goal node, look one step back
         t, alpha = get_node_data(path[-2])
@@ -247,7 +249,7 @@ def build_alpha_constraints(alpha_nodes, bands):
 
     return min_constraints, max_constraints
 
-def plot(n0=0, n=8005, path=None, scatter=False, limits=None, optimal=False, background=False):
+def plot(n0=0, n=8005, path=None, scatter=False, limits=None, null_path=None):
     fig, ax = plt.subplots(1, 1, figsize=(9, 6))
     time = np.linspace(0, 800, 8005)
     zeros = np.zeros(8005)
@@ -261,16 +263,90 @@ def plot(n0=0, n=8005, path=None, scatter=False, limits=None, optimal=False, bac
     for t, alpha, signs in alpha_points:
         if scatter:
             plt.scatter(time[t], alpha, color='red', marker='o')
+            plt.scatter(0, alpha_nullspace, color='blue', marker='x')
     if limits is not None:
         min_limit, max_limit = limits
         plt.plot(time, max_limit, color='black', linestyle='--', label='Max Constraint')
         plt.plot(time, min_limit, color='black', label='Min Constraint')
+    if null_path is not None:
+        N = null_path.shape[0]
+        plt.plot(time[0:N], null_path, color='blue', linestyle='--', label='Nullspace Path')
 
     plt.xlabel("Time (s)")
     plt.ylabel("Nullspace component")
     plt.title("Zero speed bands vs time")
-    # plt.legend()
+    plt.legend()
     plt.show()
+
+def solver(begin_alpha, limits=None, guess=None, N=200):
+    if limits is None:
+        return
+    min_constraint, max_constraint = limits
+    temp_time = np.linspace(0, 800, 8005)
+    ocp = Ocp(t0=0, T=temp_time[100])
+    w = ocp.state(4)
+    alpha_control = ocp.control()
+    T_sc = ocp.parameter(3, grid='control')
+
+    ocp.set_value(T_sc, torque_data[:,0:N])
+
+    T_rw = R_PSEUDO @ T_sc + NULL_R @ alpha_control
+    der_state = I_INV @ T_rw
+    ocp.set_der(w, der_state)
+
+    alpha_null = ocp.variable(grid='control')
+    ocp.subject_to(alpha_null == (-w[0] + w[1] - w[2] + w[3]) / 4)
+    # alpha_null = (-w[0] + w[1] - w[2] + w[3]) / 4
+
+    w_initial = OMEGA_START
+    alpha_min_constraint = ocp.parameter(grid='control')
+    alpha_max_constraint = ocp.parameter(grid='control')
+    ocp.set_value(alpha_min_constraint, min_constraint[0:N])
+    ocp.set_value(alpha_max_constraint, max_constraint[0:N])
+
+    ocp.subject_to(-MAX_TORQUE <= (T_rw <= MAX_TORQUE))  # Add torque constraints
+    ocp.subject_to(-OMEGA_MAX <= (w <= OMEGA_MAX))  # Add saturation constraints
+    ocp.subject_to(alpha_min_constraint <= (alpha_null <= alpha_max_constraint))  # Add saturation constraints
+    ocp.subject_to(ocp.at_t0(w) == w_initial)
+    ocp.set_initial(w, w_initial)  # Set initial guess
+
+    # ocp_t = ocp.t
+    # w_sym, t_sym = symbols('w t')
+    a = 0.1
+    b = 1e-4
+    # objective_expr = exp(-a * w ** 2)  # Gaussian function
+    # objective_expr_casadi = lambdify((w_sym, t_sym), objective_expr, 'numpy')
+    # objective_expr_casadi = objective_expr_casadi(w, ocp_t)
+    objective_expr_casadi = np.exp(-a * w ** 2)
+    objective_expr_casadi = b*w**2
+    objective = ocp.integral(sum1(objective_expr_casadi))
+    ocp.add_objective(objective)
+
+    ocp.solver('ipopt', SOLVER_OPTS)  # Use IPOPT solver
+    ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
+    sol = ocp.solve()  # Solve the problem
+
+    # Post-processing: Sample solutions for this interval
+    ts, w_sol = sol.sample(w, grid='control')
+    _, alpha_sol = sol.sample(alpha, grid='control')
+    _, T_rw_sol = sol.sample(T_rw, grid='control')
+    _, alpha_null_sol = sol.sample(alpha_null, grid='control')
+
+    return w_sol, alpha_sol, T_rw_sol, alpha_null_sol
+
+def find_start_node(sections, null_alpha, base_speed):
+    # desired_signs = np.sign((base_speed - (NULL_R @ null_alpha.reshape(1,1))).flatten())
+    desired_signs = np.sign(base_speed).flatten()
+    first_section = sections[0]
+    first_begin_layer = first_section.begin_layer
+    print("Desired signs:", desired_signs)
+    for node in first_begin_layer.nodes:
+        print("Node:", node)
+        # print(node.signs)
+        if np.array_equal(node.signs, desired_signs):
+            print("Match found")
+            return [f"{first_section.name}_{node.id}"]
+    return None  # No matching node found
 
 class NodeOption:
     def __init__(self, alpha, base_speed, node_type="mid", layer_idx=None, local_id=None):
@@ -366,7 +442,9 @@ for i, end_index in enumerate(rising):
     section.populate_section(start_index, end_index, stationary_index)
     problem.append(section)
 
-source_ids = ["Section_1_0_3"]
+# source_ids = ["Section_1_0_3"]
+source_ids = find_start_node(problem, alpha_nullspace, OMEGA_START)
+print("Source IDs:", source_ids)
 target_ids = ["goal_8100_0"]
 graph = build_graph(problem)
 assign_mixed_costs(graph, penalty=50000)
@@ -385,5 +463,18 @@ alpha_points = extract_info_from_path(graph, path)
 for t, alpha, signs in alpha_points:
     print(f"Time index: {t}, Alpha: {alpha}", f"Signs: {signs}")
 
+print("Initial alpha:", alpha_nullspace)
+print("omega start:", OMEGA_START)
 alpha_min, alpha_max = build_alpha_constraints(alpha_points, segments)
-plot(scatter=True, limits=(alpha_min,alpha_max))
+plot(scatter=True, limits=(alpha_min,alpha_max), null_path=None)
+try:
+    omega_sol, _, _, null_solution =solver(alpha_points, limits=(alpha_min, alpha_max))
+except Exception as e:
+    print("Solver failed:", e)
+    omega_sol = None
+    null_solution = None
+# print("intial omega:", OMEGA_START)
+# print("initial omega:", omega_sol[0,:])
+# print("nullspace:", null_solution[0])
+
+plot(scatter=True, limits=(alpha_min,alpha_max), null_path=null_solution)
