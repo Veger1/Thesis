@@ -185,8 +185,7 @@ def rockit_optimize(x_start, x_end, x_min0, x_max0, x_target, zone_min, zone_max
 
     return alpha_sol[:-1]
 
-
-def plot(n0=0, n=8005, path=None, scatter=True, limits=True, optimal=False):
+def plot(n0=0, n=8005, path=None, scatter=True, limits=True, optimal=False, background=False):
     fig, ax = plt.subplots(1, 1, figsize=(9, 6))
     # ax.plot(time, segments.T, color='gray')
 
@@ -194,8 +193,10 @@ def plot(n0=0, n=8005, path=None, scatter=True, limits=True, optimal=False):
     if scatter:
         for i in range(4):
             ax.scatter(np.ones_like(begin_alphas[i]) * falling[i] / 10, begin_alphas[i], color='b', zorder=5)
-            ax.scatter(np.ones_like(end_alphas[i]) * rising[i] / 10, end_alphas[i], color='r', zorder=5)
-
+            # ax.scatter(np.ones_like(end_alphas[i]) * rising[i] / 10, end_alphas[i], color='r', zorder=5)
+    if background:
+        ax.axvspan(0, 200, facecolor='lightgrey', alpha=0.3, zorder=0)
+        ax.axvspan(400, 600, facecolor='lightgrey', alpha=0.3, zorder=0)
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
     for i in range(0, 8, 2):
         color = colors[i // 2 % len(colors)]  # Cycle through colors
@@ -210,7 +211,7 @@ def plot(n0=0, n=8005, path=None, scatter=True, limits=True, optimal=False):
     plt.xlabel("Time (s)")
     plt.ylabel("Nullspace component")
     plt.title("Zero speed bands vs time")
-    plt.legend()
+    # plt.legend()
     plt.show()
 
 data = load_data('Data/Slew1.mat')
@@ -262,5 +263,5 @@ for k in range(len(begin_alphas)):
         for j in range(len(end_alphas[k])):
             constrained_segments = segments[:, begin:begin+size]
             min_constraint, max_constraint, crossing_min, crossing_max = compute_constraints(begin_signs[k][i], end_signs[k][j], constrained_segments, position=begin_alphas[k][i])
-            x_opt = rockit_optimize(begin_alphas[k][i], end_alphas[k][j], min_constraint, max_constraint, alpha_ref, crossing_min, crossing_max)
-            plot(begin, size, path=x_opt)
+            # x_opt = rockit_optimize(begin_alphas[k][i], end_alphas[k][j], min_constraint, max_constraint, alpha_ref, crossing_min, crossing_max)
+            plot(begin, size, limits=False, scatter=True, background=True)

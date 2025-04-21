@@ -152,90 +152,6 @@ def find_all_equal_shortest_paths(adjacency):
 
     return all_paths
 
-
-def create_graph2(all_paths, alpha_first, alpha_second, all_signs):
-    G = nx.DiGraph()
-    positions = {}  # For visualization purposes
-    edge_labels = {}  # To store edge labels (costs)
-
-    # Process each solution.
-    for sol in range(len(all_paths)):
-        sol_dict = all_paths[sol]
-        for (begin_idx, end_idx), paths_list in sol_dict.items():
-            # Use the first available cost; the actual path is ignored.
-            cost, _ = paths_list[0]
-
-            # Define unique node names.
-            begin_node = f"{sol}_b_{begin_idx}"
-            end_node = f"{sol}_e_{end_idx}"
-
-            # Add the begin node with its alpha and sign.
-            if begin_node not in G:
-                try:
-                    a_val = alpha_first[sol][begin_idx]
-                except IndexError:
-                    a_val = None
-                try:
-                    sign_value = all_signs[sol][0][begin_idx]
-                except IndexError:
-                    sign_value = None
-                G.add_node(begin_node, alpha=a_val, sign=sign_value, type='begin')
-                # Position: x is based on the solution number, y is based on the index.
-                positions[begin_node] = (sol * 3, begin_idx)
-
-            # Add the end node with its alpha and sign.
-            if end_node not in G:
-                try:
-                    a_val = alpha_second[sol][end_idx]
-                except IndexError:
-                    a_val = None
-                try:
-                    sign_value = all_signs[sol][-1][end_idx]
-                except IndexError:
-                    sign_value = None
-                G.add_node(end_node, alpha=a_val, sign=sign_value, type='end')
-                positions[end_node] = (sol * 3 + 2, end_idx)
-
-            # Connect the begin node to the end node within the solution.
-            G.add_edge(begin_node, end_node, weight=cost)
-            edge_labels[(begin_node, end_node)] = cost
-
-    # Link solutions by connecting end nodes in sol to begin nodes in sol+1 if they have matching sign vectors.
-    for sol in range(len(all_paths) - 1):
-        # Collect end nodes from current solution.
-        end_nodes = [node for node, attr in G.nodes(data=True)
-                     if node.startswith(f"{sol}_") and attr.get('type') == 'end']
-        # Collect begin nodes from next solution.
-        next_begin_nodes = [node for node, attr in G.nodes(data=True)
-                            if node.startswith(f"{sol + 1}_") and attr.get('type') == 'begin']
-
-        # For each end node and each begin node in the next solution, check the sign vectors.
-        for en in end_nodes:
-            sign_en = G.nodes[en].get('sign')
-            for bn in next_begin_nodes:
-                sign_bn = G.nodes[bn].get('sign')
-                if sign_en is not None and sign_bn is not None:
-                    # If sign vectors match exactly, create an edge.
-                    if count_sign_changes(sign_en, sign_bn) == 0:
-                        # Here, instead of a linking cost of 0, we take the alpha from the begin node (next solution).
-                        linking_cost = G.nodes[bn].get('alpha')
-                        G.add_edge(en, bn, weight=linking_cost)
-                        edge_labels[(en, bn)] = linking_cost
-
-    # Create the "Goal" node and attach it to every end node of the last solution.
-    goal_node = "Goal"
-    G.add_node(goal_node)
-    last_sol = len(all_paths) - 1
-    last_end_nodes = [node for node, attr in G.nodes(data=True)
-                      if node.startswith(f"{last_sol}_") and attr.get('type') == 'end']
-    for node in last_end_nodes:
-        G.add_edge(node, goal_node, weight=0)
-        edge_labels[(node, goal_node)] = 0
-        positions[goal_node] = (len(all_paths) * 3 + 2, 0)
-
-    return G, positions, edge_labels, None
-
-
 def create_graph(all_paths, alpha_first, alpha_second, all_signs, dummy_alpha):
     """
     Constructs a directed graph based on solution dictionaries, then appends
@@ -247,15 +163,17 @@ def create_graph(all_paths, alpha_first, alpha_second, all_signs, dummy_alpha):
       alpha_first: list of lists; alpha_first[sol][i] is the alpha of the i-th beginning node in solution sol.
       alpha_second: list of lists; alpha_second[sol][j] is the alpha of the j-th ending node in solution sol.
       all_signs: list of sign layers. For each solution sol (0 to N-1):
-                   - all_signs[sol][0] gives the sign vectors for the beginning nodes.
-                   - all_signs[sol][-1] gives the sign vectors for the ending nodes.
+                 - all_signs[sol][0] gives the sign vectors for the beginning nodes.
+                 - all_signs[sol][-1] gives the sign vectors for the ending nodes.
                  The last element, all_signs[-1], is the dummy layer sign vectors (one per dummy node).
       dummy_alpha: list; dummy_alpha[i] is the alpha for the i-th dummy node.
 
     Returns:
-      G: The resulting directed graph.
+      G: The resulting directed graph, where each edge is labeled with two cost attributes:
+           - "cross_cost": cost for internal solution crossings.
+           - "vib_cost": cost for solution-to-solution (transition) vibrations.
       positions: Dictionary mapping nodes to positions (for visualization).
-      edge_labels: Dictionary mapping edge tuples to their weight.
+      edge_labels: Dictionary mapping edge tuples (u,v) to a tuple (vib_cost, cross_cost).
     """
     G = nx.DiGraph()
     positions = {}
@@ -285,17 +203,20 @@ def create_graph(all_paths, alpha_first, alpha_second, all_signs, dummy_alpha):
 
     # ---------------------------------------------------
     # Step 2: Add internal solution edges (begin -> end) from all_paths.
+    # These edges represent the crossing cost.
     # ---------------------------------------------------
     for sol, sol_dict in enumerate(all_paths):
         for (begin_idx, end_idx), paths_list in sol_dict.items():
             cost, _ = paths_list[0]  # Only use the cost from the first path.
             begin_node = f"{sol}_b_{begin_idx}"
             end_node = f"{sol}_e_{end_idx}"
-            G.add_edge(begin_node, end_node, weight=cost)
-            edge_labels[(begin_node, end_node)] = cost
+            # For internal edges: cross_cost = cost, vib_cost = 0.
+            G.add_edge(begin_node, end_node, cross_cost=cost, vib_cost=0)
+            edge_labels[(begin_node, end_node)] = (0, cost)
 
     # ---------------------------------------------------
     # Step 3: Add transitions between consecutive real solutions.
+    # These edges represent vibration costs.
     # ---------------------------------------------------
     for sol in range(num_real_sols - 1):
         num_end_nodes = len(all_signs[sol][-1])
@@ -307,10 +228,10 @@ def create_graph(all_paths, alpha_first, alpha_second, all_signs, dummy_alpha):
                 bn = f"{sol + 1}_b_{i}"
                 sign_bn = G.nodes[bn]['sign']
                 if count_sign_changes(sign_en, sign_bn) == 0:
-                    # Transition edge cost: use alpha from the beginning node in the next solution.
+                    # Transition edge: vib_cost = alpha from the next solution's begin node, cross_cost = 0.
                     linking_cost = G.nodes[bn]['alpha']
-                    G.add_edge(en, bn, weight=linking_cost)
-                    edge_labels[(en, bn)] = linking_cost
+                    G.add_edge(en, bn, vib_cost=linking_cost, cross_cost=0)
+                    edge_labels[(en, bn)] = (linking_cost, 0)
 
     # ---------------------------------------------------
     # Step 4: Create dummy layer nodes from dummy signs (all_signs[-1])
@@ -322,11 +243,12 @@ def create_graph(all_paths, alpha_first, alpha_second, all_signs, dummy_alpha):
         # Use the provided dummy_alpha for the cost.
         alpha_val = dummy_alpha[i] if i < len(dummy_alpha) else None
         G.add_node(node_name, alpha=alpha_val, sign=sign, type='dummy')
-        # Place dummy nodes to the right of the last solution.
+        # Place dummy nodes to the right of the last real solution.
         positions[node_name] = (num_real_sols * 3, i)
 
     # ---------------------------------------------------
     # Step 5: Add transitions from the last real solution's end nodes to dummy nodes.
+    # These edges represent the vibration cost.
     # ---------------------------------------------------
     last_sol = num_real_sols - 1
     num_end_last = len(all_signs[last_sol][-1])
@@ -337,106 +259,76 @@ def create_graph(all_paths, alpha_first, alpha_second, all_signs, dummy_alpha):
             dummy_node = f"dummy_{i}"
             sign_dummy = G.nodes[dummy_node]['sign']
             if count_sign_changes(sign_en, sign_dummy) == 0:
-                # Transition cost taken from the dummy node's alpha.
+                # Transition edge: vib_cost = dummy node's alpha, cross_cost = 0.
                 linking_cost = G.nodes[dummy_node]['alpha']
-                G.add_edge(en, dummy_node, weight=linking_cost)
-                edge_labels[(en, dummy_node)] = linking_cost
+                G.add_edge(en, dummy_node, vib_cost=linking_cost, cross_cost=0)
+                edge_labels[(en, dummy_node)] = (linking_cost, 0)
 
     # ---------------------------------------------------
     # Step 6: Connect dummy nodes to the final "Goal" node.
+    # Here we assign zero cost so that the vibration cost is not double-counted.
     # ---------------------------------------------------
     goal_node = "Goal"
     G.add_node(goal_node)
-    # Option 1: Use the dummy alpha as the cost for the edge to goal.
-    # (This provides a transition cost also from the dummy layer to the goal.)
     for i in range(num_dummy):
         dummy_node = f"dummy_{i}"
-        linking_cost = G.nodes[dummy_node]['alpha']
-        G.add_edge(dummy_node, goal_node, weight=0)
-        edge_labels[(dummy_node, goal_node)] = 0
-        positions[goal_node] = (len(all_paths) * 3 + 2, 0)
+        # Set both vib_cost and cross_cost to zero.
+        G.add_edge(dummy_node, goal_node, vib_cost=0, cross_cost=0)
+        edge_labels[(dummy_node, goal_node)] = (0, 0)
+    # Position the goal node at the far right.
+    positions[goal_node] = ((num_real_sols) * 3 + 2, 0)
 
     return G, positions, edge_labels, 0
 
-def create_graph_(all_paths, alpha_first, alpha_second, all_signs):
-    G = nx.DiGraph()
-    positions = {}
-    edge_labels = {}
+def assign_combined_weights(G, crossing_multiplier):
+    """
+    For each edge in G, assign a combined weight:
 
-    num_solutions = len(all_signs)
+        combined_weight = vib_cost + crossing_multiplier * cross_cost
 
-    # -------------------------
-    # Step 1: Create Nodes based on all_signs
-    # -------------------------
-    for sol in range(num_solutions):
-        # Create begin nodes based on the first layer of signs
-        begin_signs = all_signs[sol][0]
-        for i, sign in enumerate(begin_signs):
-            node_name = f"{sol}_b_{i}"
-            G.add_node(node_name,
-                       alpha=alpha_first[sol][i] if i < len(alpha_first[sol]) else None,
-                       sign=sign,
-                       type='begin')
-            # Position: x based on sol (shifted by multiple) and y = index
-            positions[node_name] = (sol * 3, i)
+    The crossing_multiplier allows us to trade off between crossing cost (typically small)
+    and vibration cost (typically large).
+    """
+    for u, v, data in G.edges(data=True):
+        vib = data.get("vib_cost", 0)
+        cross = data.get("cross_cost", 0)
+        data["combined_weight"] = vib + crossing_multiplier * cross
 
-        # Create end nodes based on the last layer of signs
-        end_signs = all_signs[sol][-1]
-        for j, sign in enumerate(end_signs):
-            node_name = f"{sol}_e_{j}"
-            G.add_node(node_name,
-                       alpha=alpha_second[sol][j] if j < len(alpha_second[sol]) else None,
-                       sign=sign,
-                       type='end')
-            positions[node_name] = (sol * 3 + 2, j)
+def compute_path_costs(path, G):
+    """
+    Given a path (as a list of nodes) and graph G, computes:
+      - Total vibration cost (sum of vib_cost),
+      - Total crossing cost (sum of cross_cost), and
+      - Total combined cost (sum of combined_weight).
+    Returns a tuple (total_vib, total_cross, total_combined).
+    """
+    total_vib = 0
+    total_cross = 0
+    total_combined = 0
+    for i in range(len(path) - 1):
+        data = G.get_edge_data(path[i], path[i + 1])
+        total_vib += data.get("vib_cost", 0)
+        total_cross += data.get("cross_cost", 0)
+        total_combined += data.get("combined_weight", 0)
+    return total_vib, total_cross, total_combined
 
-    # -------------------------
-    # Step 2: Add Internal Solution Edges (from begin to end in the same solution)
-    # -------------------------
-    for sol, sol_dict in enumerate(all_paths):
-        # For each entry with key (begin_idx, end_idx) add an edge with the cost.
-        for (begin_idx, end_idx), paths_list in sol_dict.items():
-            # Use the cost from the first available tuple.
-            cost, _ = paths_list[0]
-            begin_node = f"{sol}_b_{begin_idx}"
-            end_node = f"{sol}_e_{end_idx}"
-            G.add_edge(begin_node, end_node, weight=cost)
-            edge_labels[(begin_node, end_node)] = cost
-
-    # -------------------------
-    # Step 3: Add Transitions between consecutive solutions based on sign matching.
-    # -------------------------
-    for sol in range(num_solutions - 1):
-        # For each end node in the current solution, and each begin node in the next solution:
-        num_end_nodes = len(all_signs[sol][-1])
-        num_begin_nodes_next = len(all_signs[sol + 1][0])
-        for j in range(num_end_nodes):
-            en = f"{sol}_e_{j}"
-            sign_en = G.nodes[en].get('sign')
-            for i in range(num_begin_nodes_next):
-                bn = f"{sol + 1}_b_{i}"
-                sign_bn = G.nodes[bn].get('sign')
-                if sign_en is not None and sign_bn is not None:
-                    if count_sign_changes(sign_en, sign_bn) == 0:
-                        # Use the alpha from the begin node of solution sol+1
-                        linking_cost = G.nodes[bn].get('alpha')
-                        G.add_edge(en, bn, weight=linking_cost)
-                        edge_labels[(en, bn)] = linking_cost
-
-    # -------------------------
-    # Step 4: Add a final Goal node and link every end node from the last solution to it.
-    # -------------------------
-    goal_node = "Goal"
-    G.add_node(goal_node)
-    last_sol = num_solutions - 1
-    num_end_last = len(all_signs[last_sol][-1])
-    for j in range(num_end_last):
-        node = f"{last_sol}_e_{j}"
-        G.add_edge(node, goal_node, weight=0)
-        edge_labels[(node, goal_node)] = 0
-        positions[goal_node] = (len(all_paths) * 3 + 2, 0)
-
-    return G, positions, edge_labels, _
+def find_k_best_paths(G, source, target, k, weight_attribute="combined_weight"):
+    """
+    Finds up to k best simple paths from source to target in graph G, using the specified weight attribute.
+    Returns a list of tuples (path, total_weight).
+    """
+    paths = []
+    try:
+        generator = nx.shortest_simple_paths(G, source, target, weight=weight_attribute)
+        for i, path in enumerate(generator):
+            if i >= k:
+                break
+            tot_weight = sum(G.get_edge_data(path[j], path[j + 1]).get(weight_attribute, 0)
+                             for j in range(len(path) - 1))
+            paths.append((path, tot_weight))
+    except nx.NetworkXNoPath:
+        pass
+    return paths
 
 def visualize_paths(G, position, edge_labels, path=None):
     plt.figure(figsize=(12, 6))
@@ -477,41 +369,6 @@ def calc_cost(index1, index2, omega_input, reference=0):
             cost.append(sum_omega_square1)
         cost_end.append(cost)
     return alpha_begin, alpha_end, cost_begin, cost_end
-
-def compute_constraints(wheel_signs_before, wheel_signs_after, bands, position=0):
-    N = bands.shape[1]
-    min_constraints = np.full(N, -np.inf)
-    max_constraints = np.full(N, np.inf)
-    crossings_max = []
-    crossings_min = []
-    for i in range(len(wheel_signs_before)):
-        band_idx = 2 * i  # Row index corresponding to the wheel's bands
-        band_max = np.max(bands[band_idx:band_idx + 2], axis=0)
-        band_min = np.min(bands[band_idx:band_idx + 2], axis=0)
-        if wheel_signs_before[i] == wheel_signs_after[i]:  # Sign change detected
-            if position < band_max[0]:
-                max_constraints = np.minimum(max_constraints, band_min)
-
-            if position > band_min[0]:
-                min_constraints = np.maximum(min_constraints, band_max)
-        else:
-            crossings_max.append(band_max)
-            crossings_min.append(band_min)
-
-
-    return min_constraints, max_constraints, crossings_min, crossings_max
-
-def find_crossings(signals):
-    num_signals, N = signals.shape
-    crossings = {}
-
-    for i in range(num_signals):
-        for j in range(i+1, num_signals):
-            diff = signals[i] - signals[j]
-            crossing_indices = np.where(np.diff(np.sign(diff)) != 0)[0]
-            crossings[(i, j)] = crossing_indices
-
-    return crossings
 
 def plot(n0=0, n=8005, path=None, scatter=True, limits=True, optimal=False):
     fig, ax = plt.subplots(1, 1, figsize=(9, 6))
@@ -559,7 +416,6 @@ else:
 time = np.linspace(0, 800, 8005)
 # alpha = nullspace_alpha(momentum4)
 alpha, alpha_ref = np.zeros_like(time, dtype=int), 0
-alpha_rising, alpha_falling, cost_rising, cost_falling = calc_cost(rising, falling, momentum4, reference=alpha_ref)
 
 segments = calc_segments(momentum4)
 all_options = []
@@ -587,25 +443,38 @@ for k in range(len(sections)):
     all_equal_paths.append(equal_paths)
 
 options = alpha_options(momentum4[:,-1].reshape(4,1),alpha_ref)
-alpha_end = options[0]
 signs = alpha_to_sign(options, momentum4[:,-1].reshape(4,1), [0])
-print(signs)
 all_signs.append(signs[0])
+alpha_rising, alpha_falling, cost_rising, cost_falling = calc_cost(rising, falling, momentum4, reference=alpha_ref)
+alpha_end, _, cost_end, _ = calc_cost([-1], [], momentum4, reference=alpha_ref)
+
 
 plot(scatter=False)
-graph, positions, labels, nodes = create_graph(all_equal_paths, alpha_falling, alpha_rising, all_signs, alpha_end)
-shortest_path = nx.dijkstra_path(graph, source='0_b_0', target='Goal', weight='weight')
-# print("Path to goal:", shortest_path)
+
+# graph, positions, labels, nodes = create_graph(all_equal_paths, alpha_falling, alpha_rising, all_signs, alpha_end[0])
+graph, positions, labels, nodes = create_graph(all_equal_paths, cost_falling, cost_rising, all_signs, cost_end[0])
+assign_combined_weights(graph, crossing_multiplier=0)
+shortest_path = nx.dijkstra_path(graph, source='0_b_2', target='Goal', weight='combined_weight')
+print("Path to goal:", shortest_path)
 visualize_paths(graph, positions, labels, path=shortest_path)
+
 # visualize_paths(graph, positions, labels)
+source = "0_b_2"
+target = "Goal"
+best_paths = find_k_best_paths(graph, source, target, k=10, weight_attribute="combined_weight")
 
-plt.show()
-
-
-
+print("Best path(s) found optimizing for vibration cost only (ignoring crossings):\n")
+for idx, (path, tot_weight) in enumerate(best_paths):
+    vib, cross, comb = compute_path_costs(path, graph)
+    print(f"Path {idx+1}: {path}")
+    print(f"  Total Vibration Cost: {vib}")
+    print(f"  Total Crossing Cost:  {cross}")
+    print(f"  Total Combined Cost:  {comb}\n")
 
 new_time = clock.time()
 print("Time taken: ", new_time - old_time, "seconds")
+
+plt.show()
 
 
 
