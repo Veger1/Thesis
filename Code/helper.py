@@ -69,6 +69,34 @@ def nullspace_alpha(data):
         alpha[i] = (- data[0, i] + data[1, i] - data[2, i] + data[3, i]) / 4
     return alpha
 
+def best_alpha(merged_intervals, alpha=0):
+    inverted_intervals = []
+    for i, interval in enumerate(merged_intervals):
+        if i == 0:
+            inverted_intervals.append([-np.inf, interval[0]])  # [-inf, -3]
+        if i == len(merged_intervals) - 1:
+            inverted_intervals.append([interval[1], np.inf])  # [4, inf]
+        else:
+            inverted_intervals.append([interval[1], merged_intervals[i + 1][0]])
+    # Step 2: Find the smallest absolute value in each inverted interval
+    result = []
+    for interval in inverted_intervals:
+        if interval[0] == -np.inf:
+            result.append(interval[1])  # First interval boundary
+        elif interval[1] == np.inf:
+            result.append(interval[0])  # Last interval boundary
+        else:
+            if interval[0] < alpha < interval[1]:
+                result.append(alpha)
+            else:
+                dist_to_0 = abs(interval[0] - alpha)
+                dist_to_1 = abs(interval[1] - alpha)
+
+                if dist_to_0 < dist_to_1:
+                    result.append(interval[0])
+                else:
+                    result.append(interval[1])
+    return result
 
 
 

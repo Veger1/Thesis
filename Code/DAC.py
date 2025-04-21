@@ -13,8 +13,8 @@ def calc_segments(omega_input):
     for j in range(length):
         omega = momentum4[:, j]
         for i in range(4):
-            segments_result[2 * i, j] = (OMEGA_MIN - omega[i]) * (-1) ** i
-            segments_result[1 + 2 * i, j] = (-OMEGA_MIN - omega[i]) * (-1) ** i
+            segments_result[2 * i, j] = (OMEGA_MIN - omega[i]) * (-1) ** (i+1)
+            segments_result[1 + 2 * i, j] = (-OMEGA_MIN - omega[i]) * (-1) ** (i+1)
     return segments_result
 
 def alpha_options(omega_input, reference=0):
@@ -23,8 +23,8 @@ def alpha_options(omega_input, reference=0):
         intervals = np.zeros((4, 2))
         omega_begin = omega_input[:, j]
         for i in range(4):
-            first = (OMEGA_MIN - omega_begin[i]) * (-1) ** i
-            second = (-OMEGA_MIN - omega_begin[i]) * (-1) ** i
+            first = (OMEGA_MIN - omega_begin[i]) * (-1) ** (i+1)
+            second = (-OMEGA_MIN - omega_begin[i]) * (-1) ** (i+1)
             intervals[i] = np.sort([first, second]).flatten()  # Potentially sort manually
         sorted_intervals = intervals[np.argsort(intervals[:, 0])]
         merged_intervals = []
@@ -342,9 +342,10 @@ def find_start_node(sections, null_alpha, base_speed):
     print("Desired signs:", desired_signs)
     for node in first_begin_layer.nodes:
         print("Node:", node)
+    for node in first_begin_layer.nodes:
         # print(node.signs)
         if np.array_equal(node.signs, desired_signs):
-            print("Match found")
+            print("Match found", node.id)
             return [f"{first_section.name}_{node.id}"]
     return None  # No matching node found
 
@@ -354,7 +355,7 @@ class NodeOption:
         self.type = node_type  # 'begin', 'end', 'stationary' or 'mid'
         self.time_index = layer_idx
         self.layer_type = node_type
-        self.wheel_speeds = base_speed - (NULL_R * alpha).flatten()
+        self.wheel_speeds = base_speed + (NULL_R * alpha).flatten()
         self.vibration_cost = np.sum(self.wheel_speeds**2)
         self.signs = np.sign(self.wheel_speeds)
         self.id = f"{layer_idx}_{local_id}"
@@ -430,6 +431,10 @@ momentum4_with_nullspace = pseudo_sol(torque_data)
 alpha_nullspace = nullspace_alpha(momentum4_with_nullspace[:,0:1])
 momentum3 = R @ momentum4_with_nullspace
 momentum4 = R_PSEUDO @ momentum3
+# momentum4 = momentum4_with_nullspace
+print("Momentum4 with nullspace:", momentum4_with_nullspace[:,0])
+print("Momentum4:", momentum4[:,0])
+
 segments = calc_segments(momentum4)
 
 problem = []
