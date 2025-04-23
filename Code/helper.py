@@ -4,7 +4,8 @@ This file contains helper functions that are used in the main code.
 import numpy as np
 from sympy import symbols, lambdify
 from config import OMEGA_START, R_PSEUDO, IRW, R
-
+from itertools import combinations
+from collections import defaultdict
 
 def rpm_to_rad(rpm):
     return rpm * 2 * np.pi / 60
@@ -69,15 +70,18 @@ def nullspace_alpha(data):
         alpha[i] = (- data[0, i] + data[1, i] - data[2, i] + data[3, i]) / 4
     return alpha
 
-def best_alpha(merged_intervals, alpha=0):
+def best_alpha(merged_intervals, alpha=0, use_bounds=False):
     inverted_intervals = []
     for i, interval in enumerate(merged_intervals):
-        if i == 0:
+        if i == 0 and not use_bounds:
             inverted_intervals.append([-np.inf, interval[0]])  # [-inf, -3]
-        if i == len(merged_intervals) - 1:
+
+        if i == len(merged_intervals) - 1 and not use_bounds:
             inverted_intervals.append([interval[1], np.inf])  # [4, inf]
-        else:
+
+        if i < len(merged_intervals) - 1:
             inverted_intervals.append([interval[1], merged_intervals[i + 1][0]])
+
     # Step 2: Find the smallest absolute value in each inverted interval
     result = []
     for interval in inverted_intervals:
@@ -98,5 +102,94 @@ def best_alpha(merged_intervals, alpha=0):
                     result.append(interval[1])
     return result
 
+def compute_band_intersections(stacked_bands):
+    assert stacked_bands.shape[0] == 8
+    N = stacked_bands.shape[1]
+    num_bands = 4
+    sorted_bands = stacked_bands.reshape((num_bands, 2, N))  # shape (4, 2, N)
+    overlaps = {}
+    for i, j in combinations(range(num_bands), 2):
+        lower_i, upper_i = sorted_bands[i, 0], sorted_bands[i, 1]
+        lower_j, upper_j = sorted_bands[j, 0], sorted_bands[j, 1]
 
+        lower = np.maximum(lower_i, lower_j)
+        upper = np.minimum(upper_i, upper_j)
+        is_overlap = lower < upper
+
+        intervals = []
+        if np.any(is_overlap):
+            starts = np.where(np.diff(np.concatenate(([0], is_overlap.astype(int)))) == 1)[0]
+            ends = np.where(np.diff(np.concatenate((is_overlap.astype(int), [0]))) == -1)[0]
+            for s, e in zip(starts, ends):
+                intervals.append((s, e))  # index-based interval [s, e)
+        overlaps[(i, j)] = intervals
+
+    return overlaps
+
+def invert_intervals(overlap_intervals, total_start_idx, total_end_idx):
+    inverted_dict = {}
+
+    for key, intervals in overlap_intervals.items():
+        if not intervals:
+            inverted_dict[key] = [(total_start_idx, total_end_idx)]
+            continue
+
+        # Sort and merge
+        intervals = sorted(intervals)
+        merged = [intervals[0]]
+        for current in intervals[1:]:
+            prev = merged[-1]
+            if current[0] <= prev[1]:  # overlapping or adjacent
+                merged[-1] = (prev[0], max(prev[1], current[1]))
+            else:
+                merged.append(current)
+
+        # Invert merged intervals
+        inverted = []
+        prev_end = total_start_idx
+        for start, end in merged:
+            if prev_end < start:
+                inverted.append((prev_end, start))
+            prev_end = end
+        if prev_end < total_end_idx:
+            inverted.append((prev_end, total_end_idx))
+
+        inverted_dict[key] = inverted
+
+    return inverted_dict
+
+def select_minimum_covering_nodes(inverted_intervals_dict, total_range, initial_nodes=None):
+    interval_list = []
+    idx_to_key = {}
+    idx = 0
+    for key, intervals in inverted_intervals_dict.items():
+        for interval in intervals:
+            interval_list.append(interval)
+            idx_to_key[idx] = (key, interval)
+            idx += 1
+
+    initial_nodes = set(initial_nodes) if initial_nodes else set()
+    uncovered_intervals = set(range(len(interval_list)))
+    for node in initial_nodes:
+        for i, (start, end) in enumerate(interval_list):
+            if i in uncovered_intervals and start <= node < end:
+                uncovered_intervals.remove(i)
+
+    start, end = total_range
+    coverage = defaultdict(set)
+    for t in range(start, end):
+        for i in uncovered_intervals:
+            interval = interval_list[i]
+            if interval[0] <= t < interval[1]:
+                coverage[t].add(i)
+
+    selected_nodes = set(initial_nodes)
+
+    while uncovered_intervals:
+        best_t = max(coverage.items(), key=lambda x: len(x[1] & uncovered_intervals))[0]
+        selected_nodes.add(best_t)
+        for i in coverage[best_t]:
+            uncovered_intervals.discard(i)
+
+    return sorted(selected_nodes)
 
