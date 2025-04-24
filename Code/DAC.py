@@ -66,20 +66,12 @@ def alpha_options(omega_input, reference=0, use_bounds=True):
         all_alphas.append(alphas)
     return all_alphas
 
-def calc_indices(possible_options):
-    options_count = np.array([len(a) for a in possible_options])
-    change_indices = np.where(np.diff(options_count) != 0)[0] + 1
-    # print("Change indices:", change_indices)
-    mid_indices = []
-    for j in range(len(change_indices) - 1):
-        start = change_indices[j]
-        end = change_indices[j + 1]
-        # Only include midpoint if the second region has *more* options than the first
-        if options_count[start] > options_count[end]:
-            mid_indices.append((start + end) // 2)
-    # mid_indices = [(change_indices[i] + change_indices[i+1]) // 2 for i in range(len(change_indices) - 1)]
-    # print("Mid indices:", mid_indices)
-    return mid_indices
+def calc_indices(bands):
+    crossing_intervals, overlapping_intervals = compute_band_intersections(bands)
+    inverted_intervals = invert_intervals(crossing_intervals, 0, len(low_torque_flag))
+    selected_ids = select_minimum_covering_nodes(overlapping_intervals, (0, 8004), initial_nodes=[0] + list(rising))
+    selected_ids = select_minimum_covering_nodes(inverted_intervals, (0, 8004), initial_nodes=selected_ids)
+    return selected_ids, inverted_intervals, overlapping_intervals
 
 def build_graph(sections):
     G = nx.DiGraph()
@@ -434,12 +426,14 @@ class Layer:
         self.wheel_speeds = momentum4[:, self.time_index]
         self.nodes = []
         self.alphas = None
+        self.number_of_nodes = None
         self.populate_layer()
 
     def populate_layer(self):
         if options is None:
             return
         self.alphas = options[self.time_index]
+        self.number_of_nodes = len(self.alphas)
         for k, alpha in enumerate(self.alphas):
             node = NodeOption(alpha=alpha, base_speed=self.wheel_speeds, layer_idx=self.time_index, local_id=k)
             self.add_node(node)
@@ -463,10 +457,10 @@ class Section:
         self.stationary_layer = Layer(stationary_idx, "stationary")  # Not in the layers list
 
     def populate_section(self, start_idx, end_idx, stationary_idx):
-        mid_idx = calc_indices(self.alpha_options)
+        mid_idx = [val for val in indices if start_idx < val < end_idx]
         self.add_layer(self.begin_layer)
         for j in range(len(mid_idx)):
-            layer = Layer(mid_idx[j]+ start_idx, "normal")
+            layer = Layer(mid_idx[j], "normal")
             self.add_layer(layer)
         self.add_layer(self.end_layer)
 
@@ -558,20 +552,24 @@ torque_data = load_data('Data/Slew1.mat')
 low_torque_flag = hysteresis_filter(torque_data, 0.000005, 0.000015)
 low_torque_flag[0:2] = False
 rising, falling = detect_transitions(low_torque_flag)
+stationary = np.insert(falling - 1, 0 ,0)
+stationary = np.append(stationary, len(low_torque_flag))
 falling = np.insert(falling, 0, 0)
 falling = np.append(falling, len(low_torque_flag)+1)
+
 
 momentum4_with_nullspace = pseudo_sol(torque_data)
 alpha_nullspace = nullspace_alpha(momentum4_with_nullspace[:,0:1])
 momentum3 = R @ momentum4_with_nullspace
 momentum4 = R_PSEUDO @ momentum3
 segments = calc_segments(momentum4)
+indices, solution_space, overlap_space = calc_indices(segments)
 
 problem = []
 options = alpha_options(momentum4)
 for i, end_index in enumerate(rising):
     start_index = falling[i]
-    stationary_index = falling[i+1]-1
+    stationary_index = stationary[i+1]
     section_name = f"Section_{i+1}"
     section = Section(section_name, start_index, end_index, stationary_index)
     section.populate_section(start_index, end_index, stationary_index)
@@ -611,11 +609,5 @@ except Exception as e:
     omega_sol = None
     null_solution = None
 
-old_time = clock.time()
-overlap_intervals = compute_band_intersections(segments)
-inverted_intervals = invert_intervals(overlap_intervals, 0, 8005)
-selected_idxs = select_minimum_covering_nodes(inverted_intervals, (0, 8005), initial_nodes=None)
-new_time = clock.time()
-print("Time taken for inversion and selection:", new_time - old_time)
-print("Selected indices:", selected_idxs)
-plot_overlap_intervals(inverted_intervals, node_ids=selected_idxs)
+print(indices)
+plot_overlap_intervals(solution_space, node_ids=indices)

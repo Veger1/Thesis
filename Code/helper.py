@@ -107,7 +107,8 @@ def compute_band_intersections(stacked_bands):
     N = stacked_bands.shape[1]
     num_bands = 4
     sorted_bands = stacked_bands.reshape((num_bands, 2, N))  # shape (4, 2, N)
-    overlaps = {}
+    overlaps_with_crossing = {}
+    overlaps_without_crossing = {}
     for i, j in combinations(range(num_bands), 2):
         lower_i, upper_i = sorted_bands[i, 0], sorted_bands[i, 1]
         lower_j, upper_j = sorted_bands[j, 0], sorted_bands[j, 1]
@@ -121,10 +122,29 @@ def compute_band_intersections(stacked_bands):
             starts = np.where(np.diff(np.concatenate(([0], is_overlap.astype(int)))) == 1)[0]
             ends = np.where(np.diff(np.concatenate((is_overlap.astype(int), [0]))) == -1)[0]
             for s, e in zip(starts, ends):
-                intervals.append((s, e))  # index-based interval [s, e)
-        overlaps[(i, j)] = intervals
+                pre = max(0, s - 1)
+                post = min(N - 1, e)
 
-    return overlaps
+                mid_i_pre = 0.5 * (sorted_bands[i, 0, pre] + sorted_bands[i, 1, pre])
+                mid_j_pre = 0.5 * (sorted_bands[j, 0, pre] + sorted_bands[j, 1, pre])
+
+                mid_i_post = 0.5 * (sorted_bands[i, 0, post] + sorted_bands[i, 1, post])
+                mid_j_post = 0.5 * (sorted_bands[j, 0, post] + sorted_bands[j, 1, post])
+
+                sign_pre = np.sign(mid_i_pre - mid_j_pre)
+                sign_post = np.sign(mid_i_post - mid_j_post)
+
+                # Check if it's crossing or just overlap
+                if sign_pre == sign_post and sign_pre != 0:  # No crossing, just overlap
+                    overlaps_without_crossing.setdefault((i, j), []).append((s, e))
+                elif sign_pre != sign_post:  # Crossing detected
+                    overlaps_with_crossing.setdefault((i, j), []).append((s, e))
+
+        if (i, j) not in overlaps_with_crossing:
+            overlaps_with_crossing[(i, j)] = []
+        if (i, j) not in overlaps_without_crossing:
+            overlaps_without_crossing[(i, j)] = []
+    return overlaps_with_crossing, overlaps_without_crossing
 
 def invert_intervals(overlap_intervals, total_start_idx, total_end_idx):
     inverted_dict = {}
@@ -180,7 +200,7 @@ def select_minimum_covering_nodes(inverted_intervals_dict, total_range, initial_
     for t in range(start, end):
         for i in uncovered_intervals:
             interval = interval_list[i]
-            if interval[0] <= t < interval[1]:
+            if interval[0] < t < interval[1]:
                 coverage[t].add(i)
 
     selected_nodes = set(initial_nodes)
@@ -193,3 +213,49 @@ def select_minimum_covering_nodes(inverted_intervals_dict, total_range, initial_
 
     return sorted(selected_nodes)
 
+def select_covering_nodes(original_intervals, inverted_intervals, total_range, initial_nodes=None):
+    # Step 1: Combine all intervals into one list
+    all_intervals = []
+    interval_map = {}
+    idx = 0
+    for source in [original_intervals, inverted_intervals]:
+        for key, intervals in source.items():
+            for interval in intervals:
+                all_intervals.append(interval)
+                interval_map[idx] = (key, interval)
+                idx += 1
+
+    # Step 2: Remove intervals already covered by initial nodes
+    initial_nodes = set(initial_nodes) if initial_nodes else set()
+    uncovered_intervals = set(range(len(all_intervals)))
+    for node in initial_nodes:
+        for i, (start, end) in enumerate(all_intervals):
+            if i in uncovered_intervals and start < node < end:
+                uncovered_intervals.remove(i)
+
+    # Step 3: Create coverage map (exclude edges)
+    coverage = defaultdict(set)
+    for idx in uncovered_intervals:
+        s, e = all_intervals[idx]
+        for t in range(s + 1, e):  # exclude start and end
+            coverage[t].add(idx)
+
+    selected_nodes = set(initial_nodes)
+
+    # Step 4: Greedy selection (skip edge values)
+    while uncovered_intervals:
+        # Filter valid candidates: t is not on the edge of any interval it covers
+        valid_candidates = {
+            t: ids for t, ids in coverage.items()
+            if all(t != all_intervals[i][0] and t != all_intervals[i][1] for i in ids)
+        }
+        if not valid_candidates:
+            raise ValueError("No valid (non-edge) points left to cover intervals.")
+
+        # Pick t that covers the most uncovered intervals
+        best_t = max(valid_candidates.items(), key=lambda x: len(x[1] & uncovered_intervals))[0]
+        selected_nodes.add(best_t)
+        for i in coverage[best_t]:
+            uncovered_intervals.discard(i)
+
+    return sorted(selected_nodes)
