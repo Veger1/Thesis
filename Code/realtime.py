@@ -25,7 +25,6 @@ def minmax_torque(torque_sc, omega):
     alpha_best = (max(alpha_null) + min(alpha_null)) / 2
     return alpha_best
 
-
 def minmax_omega(torque_sc, omega):
     nominator = - omega - 0.1*I_INV @ R_PSEUDO @ torque_sc
     denominator = 0.1*I_INV @ NULL_R
@@ -37,7 +36,6 @@ def squared_omega(torque_sc, omega):
     omega_new = omega + 0.1*I_INV @ R_PSEUDO @ torque_sc
     alpha =  constrained_alpha(omega_new)
     return -alpha/(0.1*41802.61224523921)  # replace with IRW
-
 
 def pseudo(torque_sc, omega):
     return np.zeros((1, 1))
@@ -217,8 +215,9 @@ def plot_index(solution):
 
 if __name__ == "__main__":
     solve()
-    repeat_ideal_omega(w_sol)
-    save('squared_omega')
+    save('pseudo')
+    # repeat_ideal_omega(w_sol)
+    # save('squared_omega')
     # w1 = w_sol.copy()
     # w2 = repeat_ideal_omega(w_sol)
     # fig = plt.figure()

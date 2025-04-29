@@ -25,6 +25,6 @@ data_to_save = {
     'all_T_sol': all_torque,
     'all_w': all_w
 }
-savemat('Data/output.mat', data_to_save)
+savemat('Data/output_MPC.mat', data_to_save)
 
 plot_mpc_evolution(w_sol, all_w, total_points=8000, horizon=30)

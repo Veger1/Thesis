@@ -26,10 +26,11 @@ OMEGA_TGT = RPM_TGT * 2 * np.pi / 60
 
 OMEGA_REF = OMEGA_TGT * NULL_R  # (4, 1)
 OMEGA_START = OMEGA_REF / 2  # (4, 1)
-np.random.seed(6)
+seed = np.random.randint(0, 1000)
+# np.random.seed(56)
+np.random.seed(seed)
 OMEGA_START = np.random.uniform(-300, 300, (4, 1))
 # OMEGA_START = np.zeros((4, 1))
-
 
 MAX_TORQUE = 2.5 * 10**-3  # Torque maximum in Nm
 LOW_TORQUE_THRESHOLD = 0.000005  # 5 e-6
@@ -38,7 +39,7 @@ HIGH_TORQUE_THRESHOLD = 0.000015 # 15 e-6
 SOLVER_OPTS = {
         "print_time": False,  # Suppress overall solver timing
         "ipopt": {
-            "print_level": 0,  # Disable IPOPT output
+            #"print_level": 0,  # Disable IPOPT output
             "sb": "yes"  # Suppress banner output
         }
     }

@@ -587,13 +587,15 @@ def plot_path(data):
     momentum3 = R @ momentum4
     momentum5 = R_PSEUDO @ momentum3
     solution = loadmat('Data/Realtime/squared_omega.mat')
+    solution = loadmat('Data/output.mat')
+
     ideal = solution['all_w_sol'].T
 
     time = np.linspace(0, 800, 8005)
     alpha = nullspace_alpha(momentum4)
 
-    other_time = np.linspace(0, 800, 8005)
-    other_alpha = -nullspace_alpha(ideal)+alpha[0]
+    other_time = np.linspace(0, 800, 8000)
+    other_alpha = -nullspace_alpha(ideal) +alpha[0]
 
     length = momentum4.shape[1]
     segments = np.zeros((8, length))
@@ -603,11 +605,15 @@ def plot_path(data):
         for i in range(4):
             segments[2*i, j] = (OMEGA_MIN - omega[i]) * (-1) ** i
             segments[1+2*i, j] = (-OMEGA_MIN - omega[i]) * (-1) ** i
-    fig, ax = plt.subplots(1, 1, figsize=(9, 6))
+
+    segments = segments - alpha[0]
+    alpha = alpha - alpha[0]
+    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
     ax.plot(time, segments.T, color='gray')
 
-    ax.plot(time, alpha, color='black', linestyle='--', label='Alpha')
+    ax.plot(time, alpha, color='black', linestyle='--', label='Ideal path')
     ax.plot(other_time, other_alpha, color='red', label='Alpha')
+
 
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
     for i in range(0, 8, 2):
@@ -615,14 +621,16 @@ def plot_path(data):
         plt.fill_between(time, segments[i], segments[i + 1], color=color, alpha=0.5, label=f'Band {i // 2 + 1}')
     plt.xlabel("Time (s)")
     plt.ylabel("Nullspace component")
-    plt.title("Gray Bands from 8xN Array")
+    plt.title("Zero speed bands vs time")
     plt.legend()
 
 
 if __name__ == "__main__":
     full_data = load_data('Data/Slew1.mat')
     plot_path(full_data)
+    # plot_input()
     # momentum = pseudo_sol(full_data)
     # plt.plot(momentum.T)
     # plt.ylim([-600,600])
     plt.show()
+    plot_MPI()

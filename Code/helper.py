@@ -1,6 +1,3 @@
-"""
-This file contains helper functions that are used in the main code.
-"""
 import numpy as np
 from sympy import symbols, lambdify
 from config import OMEGA_START, R_PSEUDO, IRW, R

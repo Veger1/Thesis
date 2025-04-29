@@ -2,7 +2,7 @@ from sympy import symbols, exp, Abs, tanh, atan, pi
 from Code.repeat_solver import *
 from scipy.io import savemat
 
-num_intervals, N = 8, 500
+num_intervals, N = 16, 500
 
 w, t = symbols('w t')
 k = 1.0

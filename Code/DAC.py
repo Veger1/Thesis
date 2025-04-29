@@ -1,5 +1,3 @@
-from rockit import Ocp, MultipleShooting
-from casadi import sum1
 from config import *
 from helper import *
 import networkx as nx
@@ -85,7 +83,7 @@ def build_graph(sections):
                 node.display_name = f"{node_id}"
                 G.add_node(node.id, node=node)
                 node_id += 1
-            # node_id = 0
+            node_id = 0  # comment out for staggered view
         if i == len(sections) - 1:
             for node in section.stationary_layer.nodes:
                 node.id = f"{section.name}_{section.stationary_layer.time_index}_{node_id}"
@@ -304,68 +302,7 @@ def plot(n0=0, n=8005, scatter=False, limits=None, null_path=None, bounds=False)
     plt.ylabel("Nullspace component")
     plt.title("Zero speed bands vs time")
     # plt.legend()
-    # plt.show()
-
-def solve(begin_alpha, limits=None, guess=None, N=1000):
-    if limits is None:
-        return
-    min_constraint, max_constraint = limits
-    min_constraint = np.where(np.isneginf(min_constraint), -1e6, min_constraint)
-    max_constraint = np.where(np.isposinf(max_constraint), 1e6, max_constraint)
-
-    temp_time = np.linspace(0, 800, 8005)
-    ocp = Ocp(t0=0, T=temp_time[N])
-    w = ocp.state(4)
-    alpha_control = ocp.control()
-    T_sc = ocp.parameter(3, grid='control')
-
-    ocp.set_value(T_sc, torque_data[:,0:N])
-
-    T_rw = R_PSEUDO @ T_sc + NULL_R @ alpha_control
-    der_state = I_INV @ T_rw
-    ocp.set_der(w, der_state)
-
-    if guess is not None:
-        print('Guess provided:')
-        ocp.set_initial(w, guess)
-    alpha_null = ocp.variable(grid='control')
-    ocp.subject_to(alpha_null == (-w[0] + w[1] - w[2] + w[3]) / 4)
-
-    w_initial = OMEGA_START
-    alpha_min_constraint = ocp.parameter(grid='control')
-    alpha_max_constraint = ocp.parameter(grid='control')
-    ocp.set_value(alpha_min_constraint, min_constraint[0:N])
-    ocp.set_value(alpha_max_constraint, max_constraint[0:N])
-
-    ocp.subject_to(-MAX_TORQUE <= (T_rw <= MAX_TORQUE))  # Add torque constraints
-    ocp.subject_to(-OMEGA_MAX <= (w <= OMEGA_MAX))  # Remove later, can inserted into segments
-    ocp.subject_to(alpha_min_constraint <= (alpha_null <= alpha_max_constraint))  # Add saturation constraints
-    ocp.subject_to(ocp.at_t0(w) == w_initial)
-    ocp.set_initial(w, w_initial)  # Set initial guess
-
-    # ocp_t = ocp.t
-    # w_sym, t_sym = symbols('w t')
-    a = 0.1
-    b = 1e-4
-    # objective_expr = exp(-a * w ** 2)  # Gaussian function
-    # objective_expr_casadi = lambdify((w_sym, t_sym), objective_expr, 'numpy')
-    # objective_expr_casadi = objective_expr_casadi(w, ocp_t)
-    objective_expr_casadi = np.exp(-a * w ** 2)
-    objective_expr_casadi = b*w**2
-    objective = ocp.integral(sum1(objective_expr_casadi))
-    ocp.add_objective(objective)
-
-    ocp.solver('ipopt', SOLVER_OPTS)  # Use IPOPT solver
-    ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
-    sol = ocp.solve()  # Solve the problem
-
-    # Post-processing: Sample solutions for this interval
-    ts, w_sol = sol.sample(w, grid='control')
-    _, alpha_sol = sol.sample(alpha, grid='control')
-    _, T_rw_sol = sol.sample(T_rw, grid='control')
-    _, alpha_null_sol = sol.sample(alpha_null, grid='control')
-
-    return w_sol, alpha_sol, T_rw_sol, alpha_null_sol
+    plt.show()
 
 def find_start_node(sections, base_speed):
     desired_signs = np.sign(base_speed).flatten()
@@ -399,6 +336,49 @@ def plot_overlap_intervals(overlaps, node_ids=None):
     ax.grid(True)
     plt.tight_layout()
     plt.show()
+
+def init_guesser(alpha_target):
+    N = 8005
+    dt = 0.1
+    w = OMEGA_START
+    alpha_control_guess = np.zeros(N-1)
+    w_guess = np.zeros((4, N))
+    w_guess[:, 0] = w.flatten()
+
+    for k in range(N-1):
+        T_sc = torque_data[:, k:k+1]
+        T_rw = R_PSEUDO @ T_sc + NULL_R @ np.array([[0]])
+        der_state = I_INV @ T_rw
+        w_next = w + der_state * dt
+        alpha_null = NULL_R_T @ w_next / 4
+        alpha_null_wanted = alpha_target[k+1]
+        alpha_diff = alpha_null_wanted - alpha_null
+
+        # T_rw = NULL_R * alpha_diff*IRW/dt
+        alpha_guess = alpha_diff*IRW/dt
+        alpha_guess = np.clip(alpha_guess, -0.1*MAX_TORQUE, 0.1*MAX_TORQUE)
+
+        # T_rw = np.clip(T_rw, -0.1*MAX_TORQUE, 0.1*MAX_TORQUE)
+        # der_state = I_INV @ T_rw * alpha_guess
+        der_state = I_INV @ NULL_R * alpha_guess
+        w = w + der_state * dt
+        w_guess[:, k+1] = w.flatten()
+        alpha_control_guess[k] = alpha_diff.item()
+
+    return w_guess, alpha_control_guess
+
+def build_omega_constraints(min_constraint, max_constraint, omega_pseudo):
+    w_sol_max = np.zeros_like(omega_pseudo)
+    w_sol_min = np.zeros_like(omega_pseudo)
+    pos_mask = (NULL_R > 0)
+
+    # Broadcast masks to shape (4,8005)
+    w_sol_max = np.where(pos_mask, omega_pseudo + max_constraint, omega_pseudo - min_constraint)
+    w_sol_min = np.where(pos_mask, omega_pseudo + min_constraint, omega_pseudo - max_constraint)
+
+    w_sol_max = np.clip(w_sol_max, -OMEGA_MAX, OMEGA_MAX)
+    w_sol_min = np.clip(w_sol_min, -OMEGA_MAX, OMEGA_MAX)
+    return w_sol_min, w_sol_max
 
 class NodeOption:
     def __init__(self, alpha, base_speed, node_type="mid", layer_idx=None, local_id=None):
@@ -472,82 +452,6 @@ class Section:
     def __repr__(self):
         return f"Section({self.name}, layers={len(self.layers)})"
 
-class Solver:
-    def __init__(self, temp_alpha_points, limits=None):
-        self.alpha_null_sol = None
-        self.w_sol = None
-        self.alpha_sol = None
-        self.T_rw_sol = None
-        self.alpha_points = temp_alpha_points
-        self.limits = limits
-        self.nullspace_solution = None
-
-    def oneshot(self, limits=None, init_guess=None, N=1000):
-        if limits is None:
-            return
-        min_constraint, max_constraint = limits
-        min_constraint = np.where(np.isneginf(min_constraint), -1e6, min_constraint)
-        max_constraint = np.where(np.isposinf(max_constraint), 1e6, max_constraint)
-
-        temp_time = np.linspace(0, 800, 8005)
-        ocp = Ocp(t0=0, T=temp_time[N])
-        w = ocp.state(4)
-        alpha_control = ocp.control()
-        T_sc = ocp.parameter(3, grid='control')
-
-        ocp.set_value(T_sc, torque_data[:, 0:N])
-
-        T_rw = R_PSEUDO @ T_sc + NULL_R @ alpha_control
-        der_state = I_INV @ T_rw
-        ocp.set_der(w, der_state)
-
-        alpha_null = ocp.variable(grid='control')
-        ocp.subject_to(alpha_null == (-w[0] + w[1] - w[2] + w[3]) / 4)
-        # alpha_null = (-w[0] + w[1] - w[2] + w[3]) / 4
-
-        w_initial = OMEGA_START
-        alpha_min_constraint = ocp.parameter(grid='control')
-        alpha_max_constraint = ocp.parameter(grid='control')
-        ocp.set_value(alpha_min_constraint, min_constraint[0:N])
-        ocp.set_value(alpha_max_constraint, max_constraint[0:N])
-
-        ocp.subject_to(-MAX_TORQUE <= (T_rw <= MAX_TORQUE))  # Add torque constraints
-        ocp.subject_to(-OMEGA_MAX <= (w <= OMEGA_MAX))  # Remove later, can inserted into segments
-        ocp.subject_to(alpha_min_constraint <= (alpha_null <= alpha_max_constraint))  # Add saturation constraints
-        ocp.subject_to(ocp.at_t0(w) == w_initial)
-        ocp.set_initial(w, w_initial)  # Set initial guess
-
-        # ocp_t = ocp.t
-        # w_sym, t_sym = symbols('w t')
-        a = 0.1
-        b = 1e-4
-        # objective_expr = exp(-a * w ** 2)  # Gaussian function
-        # objective_expr_casadi = lambdify((w_sym, t_sym), objective_expr, 'numpy')
-        # objective_expr_casadi = objective_expr_casadi(w, ocp_t)
-        objective_expr_casadi = np.exp(-a * w ** 2)
-        objective_expr_casadi = b * w ** 2
-        objective = ocp.integral(sum1(objective_expr_casadi))
-        ocp.add_objective(objective)
-
-        ocp.solver('ipopt', SOLVER_OPTS)  # Use IPOPT solver
-        ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
-        sol = ocp.solve()  # Solve the problem
-
-        # Post-processing: Sample solutions for this interval
-        ts, w_sol = sol.sample(w, grid='control')
-        _, alpha_sol = sol.sample(alpha, grid='control')
-        _, T_rw_sol = sol.sample(T_rw, grid='control')
-        _, alpha_null_sol = sol.sample(alpha_null, grid='control')
-
-        self.w_sol = w_sol
-        self.alpha_sol = alpha_sol
-        self.T_rw_sol = T_rw_sol
-        self.alpha_null_sol = alpha_null_sol
-
-        return w_sol, alpha_sol, T_rw_sol, alpha_null_sol
-
-old_time = clock.time()
-
 torque_data = load_data('Data/Slew1.mat')
 low_torque_flag = hysteresis_filter(torque_data, 0.000005, 0.000015)
 low_torque_flag[0:2] = False
@@ -578,11 +482,14 @@ for i, end_index in enumerate(rising):
 source_index = find_start_node(problem, OMEGA_START)  # source_ids = ["Section_1_0_3"]
 target_index = ["goal_8100_0"]
 graph = build_graph(problem)
-assign_mixed_costs(graph, penalty=50000)
+assign_mixed_costs(graph, penalty=10000)
 path, mixed_cost, sign_cost, vib_cost = shortest_path(graph, source_index, target_index, cost_type="mixed_cost")
 # plot_shortest_path(graph, path, get_coordinates=get_coord, title="Graph of the Shortest Path")
+# print("Mixed Cost:", mixed_cost)
+# print("Sign Cost:", sign_cost)
+# print("Vibration Cost:", vib_cost)
 
-k_paths = k_shortest_paths(graph, source_index, target_index, k=5, cost_type="mixed_cost")
+# k_paths = k_shortest_paths(graph, source_index, target_index, k=1, cost_type="mixed_cost")
 # for i, (path, mixed, sign, vib) in enumerate(k_paths):
 #     print(f"Path {i + 1}:")
 #     print(f"  Nodes: {path}")
@@ -591,23 +498,28 @@ k_paths = k_shortest_paths(graph, source_index, target_index, k=5, cost_type="mi
 #     print(f"  Vibration Cost: {vib}")
 
 alpha_points = extract_info_from_path(graph, path)
-for t, alpha, signs in alpha_points:
-    print(f"Time index: {t}, Alpha: {alpha}", f"Signs: {signs}")
+# for t, alpha, signs in alpha_points:
+#     print(f"Time index: {t}, Alpha: {alpha}", f"Signs: {signs}")
 
 alpha_min, alpha_max = build_alpha_constraints(alpha_points, segments)
-plot(scatter=True, limits=(alpha_min,alpha_max), null_path=None, bounds=True)
-
+omega_min, omega_max = build_omega_constraints(alpha_min, alpha_max, momentum4)
 guess_alpha, guess_omega = find_initial_guess(alpha_min, alpha_max)
-try:
-    old_time = clock.time()
-    raise Exception("Test")
-    omega_sol, _, _, null_solution =solve(alpha_points, guess= guess_omega[:,:1000], limits=(alpha_min, alpha_max), N=1000)
-    new_time = clock.time()
-    print("Solver time:", new_time - old_time)
-except Exception as e:
-    print("Solver failed:", e)
-    omega_sol = None
-    null_solution = None
+w_sol, alpha_sol = init_guesser(guess_alpha)
+null_sol = nullspace_alpha(w_sol)
+end_time = clock.time()
+# plot(scatter=True, limits=(alpha_min,alpha_max), null_path=None, bounds=False)
 
-print(indices)
-plot_overlap_intervals(solution_space, node_ids=indices)
+
+# from solvers import Solver
+#
+# solver = Solver(torque_data, omega_guess=w_sol)
+# solver.oneshot(n0=0, N=1000)
+# solver = Solver(torque_data, alpha_limits=(alpha_min, alpha_max))
+# old_time = clock.time()
+# omega_sol = solver.sequential(falling, rising, guess_omega, alpha_sol, momentum4)
+# new_time = clock.time()
+# print("Solver time:", new_time - old_time)
+# print(omega_sol.shape)
+# alpha_null_sol = nullspace_alpha(omega_sol)
+# print(alpha_null_sol.shape)
+# plot(scatter=True, limits=(alpha_min,alpha_max), null_path=alpha_null_sol, bounds=True)

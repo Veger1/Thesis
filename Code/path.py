@@ -193,7 +193,7 @@ def plot(n0=0, n=8005, path=None, scatter=True, limits=True, optimal=False, back
     if scatter:
         for i in range(4):
             ax.scatter(np.ones_like(begin_alphas[i]) * falling[i] / 10, begin_alphas[i], color='b', zorder=5)
-            # ax.scatter(np.ones_like(end_alphas[i]) * rising[i] / 10, end_alphas[i], color='r', zorder=5)
+            ax.scatter(np.ones_like(end_alphas[i]) * rising[i] / 10, end_alphas[i], color='r', zorder=5)
     if background:
         ax.axvspan(0, 200, facecolor='lightgrey', alpha=0.3, zorder=0)
         ax.axvspan(400, 600, facecolor='lightgrey', alpha=0.3, zorder=0)
