@@ -47,10 +47,10 @@ def detect_transitions(signal):
 
     return rising_edges, falling_edges
 
-def pseudo_sol(data):
+def pseudo_sol(data, omega_start):
     length = data.shape[1]
     omega_sol = np.zeros((4, length + 1))
-    omega_sol[:, 0] = OMEGA_START.flatten()
+    omega_sol[:, 0] = omega_start.flatten()
     for i in range(length):
         omega_sol[:, i + 1] = (omega_sol[:, i].reshape((4,1)) + 0.1 * R_PSEUDO @ data[:, i].reshape(3, 1) / IRW).flatten()
     return omega_sol
@@ -203,7 +203,13 @@ def select_minimum_covering_nodes(inverted_intervals_dict, total_range, initial_
     selected_nodes = set(initial_nodes)
 
     while uncovered_intervals:
-        best_t = max(coverage.items(), key=lambda x: len(x[1] & uncovered_intervals))[0]
+        valid_candidates = {t: ids for t, ids in coverage.items() if ids & uncovered_intervals}
+        if not valid_candidates:
+            print("Remaining uncovered intervals:")
+            for idx in uncovered_intervals:
+                print(f"Interval: {interval_list[idx]}")
+            raise ValueError("No valid candidates to cover remaining intervals.")
+        best_t = max(valid_candidates.items(), key=lambda x: len(x[1] & uncovered_intervals))[0]
         selected_nodes.add(best_t)
         for i in coverage[best_t]:
             uncovered_intervals.discard(i)
@@ -256,3 +262,10 @@ def select_covering_nodes(original_intervals, inverted_intervals, total_range, i
             uncovered_intervals.discard(i)
 
     return sorted(selected_nodes)
+
+def get_random_start(seed=None):
+    if seed is None:
+        seed = np.random.randint(0, 10000)
+    np.random.seed(seed)
+    omega_start = np.random.uniform(-300, 300, (4, 1))
+    return omega_start, seed

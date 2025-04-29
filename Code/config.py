@@ -27,8 +27,8 @@ OMEGA_TGT = RPM_TGT * 2 * np.pi / 60
 OMEGA_REF = OMEGA_TGT * NULL_R  # (4, 1)
 OMEGA_START = OMEGA_REF / 2  # (4, 1)
 seed = np.random.randint(0, 1000)
-# np.random.seed(56)
-np.random.seed(seed)
+np.random.seed(56)
+# np.random.seed(seed)
 OMEGA_START = np.random.uniform(-300, 300, (4, 1))
 # OMEGA_START = np.zeros((4, 1))
 

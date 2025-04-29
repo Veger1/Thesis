@@ -64,10 +64,10 @@ def alpha_options(omega_input, reference=0, use_bounds=True):
         all_alphas.append(alphas)
     return all_alphas
 
-def calc_indices(bands):
+def calc_indices(bands, flag, rising_ids):
     crossing_intervals, overlapping_intervals = compute_band_intersections(bands)
-    inverted_intervals = invert_intervals(crossing_intervals, 0, len(low_torque_flag))
-    selected_ids = select_minimum_covering_nodes(overlapping_intervals, (0, 8004), initial_nodes=[0] + list(rising))
+    inverted_intervals = invert_intervals(crossing_intervals, 0, len(flag))
+    selected_ids = select_minimum_covering_nodes(overlapping_intervals, (0, 8004), initial_nodes=[0] + list(rising_ids))
     selected_ids = select_minimum_covering_nodes(inverted_intervals, (0, 8004), initial_nodes=selected_ids)
     return selected_ids, inverted_intervals, overlapping_intervals
 
@@ -313,9 +313,9 @@ def find_start_node(sections, base_speed):
             return [f"{first_section.name}_{node.id}"]
     return None  # No matching node found
 
-def find_initial_guess(min_constraint, max_constraint):
+def find_initial_guess(min_constraint, max_constraint, omega):
     alpha_guess = np.clip(0, min_constraint, max_constraint)
-    omega_guess = momentum4 + NULL_R @ alpha_guess.reshape(1, -1)
+    omega_guess = omega + NULL_R @ alpha_guess.reshape(1, -1)
     return alpha_guess, omega_guess
 
 def plot_overlap_intervals(overlaps, node_ids=None):
@@ -337,7 +337,7 @@ def plot_overlap_intervals(overlaps, node_ids=None):
     plt.tight_layout()
     plt.show()
 
-def init_guesser(alpha_target):
+def init_guesser(alpha_target, torque):
     N = 8005
     dt = 0.1
     w = OMEGA_START
@@ -346,7 +346,7 @@ def init_guesser(alpha_target):
     w_guess[:, 0] = w.flatten()
 
     for k in range(N-1):
-        T_sc = torque_data[:, k:k+1]
+        T_sc = torque[:, k:k+1]
         T_rw = R_PSEUDO @ T_sc + NULL_R @ np.array([[0]])
         der_state = I_INV @ T_rw
         w_next = w + der_state * dt
@@ -400,19 +400,19 @@ class NodeOption:
         return f"NodeOption(alpha={self.alpha}, sign={self.signs}, type={self.type})"
 
 class Layer:
-    def __init__(self, time_index, layer_type="normal"):
+    def __init__(self, time_index, speeds, options_list, layer_type="normal"):
         self.time_index = time_index
         self.layer_type = layer_type
-        self.wheel_speeds = momentum4[:, self.time_index]
+        self.wheel_speeds = speeds
         self.nodes = []
         self.alphas = None
         self.number_of_nodes = None
-        self.populate_layer()
+        self.populate_layer(options_list)
 
-    def populate_layer(self):
-        if options is None:
+    def populate_layer(self, options_list):
+        if options_list is None:
             return
-        self.alphas = options[self.time_index]
+        self.alphas = options_list[self.time_index]
         self.number_of_nodes = len(self.alphas)
         for k, alpha in enumerate(self.alphas):
             node = NodeOption(alpha=alpha, base_speed=self.wheel_speeds, layer_idx=self.time_index, local_id=k)
@@ -425,22 +425,24 @@ class Layer:
         return f"Layer(t={self.time_index}, options={len(self.nodes)})"
 
 class Section:
-    def __init__(self, name, start_idx, end_idx, stationary_idx):
+    def __init__(self, name, start_idx, end_idx, stationary_idx, options_list, speeds):
         self.name = name
         self.start_idx = start_idx
         self.end_idx = end_idx
         self.stationary_idx = stationary_idx
         self.layers = []
-        self.alpha_options = options[start_idx:stationary_idx]
-        self.begin_layer = Layer(start_idx, "begin")
-        self.end_layer = Layer(end_idx, "end")
-        self.stationary_layer = Layer(stationary_idx, "stationary")  # Not in the layers list
+        self.speeds = speeds
+        self.alpha_options = options_list[start_idx:stationary_idx]
+        self.options = options_list
+        self.begin_layer = Layer(start_idx, self.speeds[:, self.start_idx], self.options,"begin")
+        self.end_layer = Layer(end_idx, self.speeds[:, self.end_idx], self.options, "end")
+        self.stationary_layer = Layer(stationary_idx, self.speeds[:, self.stationary_idx], self.options,"stationary")  # Not in the layers list
 
-    def populate_section(self, start_idx, end_idx, stationary_idx):
-        mid_idx = [val for val in indices if start_idx < val < end_idx]
+    def populate_section(self, start_idx, end_idx, stationary_idx, ids):
+        mid_idx = [val for val in ids if start_idx < val < end_idx]
         self.add_layer(self.begin_layer)
         for j in range(len(mid_idx)):
-            layer = Layer(mid_idx[j], "normal")
+            layer = Layer(mid_idx[j], self.speeds[:, mid_idx[j]], self.options, "normal")
             self.add_layer(layer)
         self.add_layer(self.end_layer)
 
@@ -452,74 +454,67 @@ class Section:
     def __repr__(self):
         return f"Section({self.name}, layers={len(self.layers)})"
 
-torque_data = load_data('Data/Slew1.mat')
-low_torque_flag = hysteresis_filter(torque_data, 0.000005, 0.000015)
-low_torque_flag[0:2] = False
-rising, falling = detect_transitions(low_torque_flag)
-stationary = np.insert(falling - 1, 0 ,0)
-stationary = np.append(stationary, len(low_torque_flag))
-falling = np.insert(falling, 0, 0)
-falling = np.append(falling, len(low_torque_flag)+1)
+if __name__ == "__main__":
+    torque_data = load_data('Data/Slew1.mat')
+    low_torque_flag = hysteresis_filter(torque_data, 0.000005, 0.000015)
+    low_torque_flag[0:2] = False
+    rising, falling = detect_transitions(low_torque_flag)
+    stationary = np.insert(falling - 1, 0 ,0)
+    stationary = np.append(stationary, len(low_torque_flag))
+    falling = np.insert(falling, 0, 0)
+    falling = np.append(falling, len(low_torque_flag))  # +1 but works?
 
 
-momentum4_with_nullspace = pseudo_sol(torque_data)
-alpha_nullspace = nullspace_alpha(momentum4_with_nullspace[:,0:1])
-momentum3 = R @ momentum4_with_nullspace
-momentum4 = R_PSEUDO @ momentum3
-segments = calc_segments(momentum4)
-indices, solution_space, overlap_space = calc_indices(segments)
+    momentum4_with_nullspace = pseudo_sol(torque_data, OMEGA_START)
+    alpha_nullspace = nullspace_alpha(momentum4_with_nullspace[:,0:1])
+    momentum3 = R @ momentum4_with_nullspace
+    momentum4 = R_PSEUDO @ momentum3
+    segments = calc_segments(momentum4)
+    indices, solution_space, overlap_space = calc_indices(segments, low_torque_flag, rising)
 
-problem = []
-options = alpha_options(momentum4)
-for i, end_index in enumerate(rising):
-    start_index = falling[i]
-    stationary_index = stationary[i+1]
-    section_name = f"Section_{i+1}"
-    section = Section(section_name, start_index, end_index, stationary_index)
-    section.populate_section(start_index, end_index, stationary_index)
-    problem.append(section)
+    problem = []
+    options = alpha_options(momentum4)
+    for i, end_index in enumerate(rising):
+        start_index = falling[i]
+        stationary_index = stationary[i+1]
+        section_name = f"Section_{i+1}"
+        section = Section(section_name, start_index, end_index, stationary_index, options, momentum4)
+        section.populate_section(start_index, end_index, stationary_index, indices)
+        problem.append(section)
 
-source_index = find_start_node(problem, OMEGA_START)  # source_ids = ["Section_1_0_3"]
-target_index = ["goal_8100_0"]
-graph = build_graph(problem)
-assign_mixed_costs(graph, penalty=10000)
-path, mixed_cost, sign_cost, vib_cost = shortest_path(graph, source_index, target_index, cost_type="mixed_cost")
-# plot_shortest_path(graph, path, get_coordinates=get_coord, title="Graph of the Shortest Path")
-# print("Mixed Cost:", mixed_cost)
-# print("Sign Cost:", sign_cost)
-# print("Vibration Cost:", vib_cost)
+    source_index = find_start_node(problem, OMEGA_START)  # source_ids = ["Section_1_0_3"]
+    target_index = ["goal_8100_0"]
+    graph = build_graph(problem)
+    assign_mixed_costs(graph, penalty=10000)
+    path, mixed_cost, sign_cost, vib_cost = shortest_path(graph, source_index, target_index, cost_type="mixed_cost")
+    # plot_shortest_path(graph, path, get_coordinates=get_coord, title="Graph of the Shortest Path")
+    # print("Mixed Cost:", mixed_cost)
+    # print("Sign Cost:", sign_cost)
+    # print("Vibration Cost:", vib_cost)
 
-# k_paths = k_shortest_paths(graph, source_index, target_index, k=1, cost_type="mixed_cost")
-# for i, (path, mixed, sign, vib) in enumerate(k_paths):
-#     print(f"Path {i + 1}:")
-#     print(f"  Nodes: {path}")
-#     print(f"  Mixed Cost: {mixed}")
-#     print(f"  Sign Cost: {sign}")
-#     print(f"  Vibration Cost: {vib}")
+    # k_paths = k_shortest_paths(graph, source_index, target_index, k=1, cost_type="mixed_cost")
+    # for i, (path, mixed, sign, vib) in enumerate(k_paths):
+    #     print(f"Path {i + 1}:")
+    #     print(f"  Nodes: {path}")
+    #     print(f"  Mixed Cost: {mixed}")
+    #     print(f"  Sign Cost: {sign}")
+    #     print(f"  Vibration Cost: {vib}")
 
-alpha_points = extract_info_from_path(graph, path)
-# for t, alpha, signs in alpha_points:
-#     print(f"Time index: {t}, Alpha: {alpha}", f"Signs: {signs}")
-
-alpha_min, alpha_max = build_alpha_constraints(alpha_points, segments)
-omega_min, omega_max = build_omega_constraints(alpha_min, alpha_max, momentum4)
-guess_alpha, guess_omega = find_initial_guess(alpha_min, alpha_max)
-w_sol, alpha_sol = init_guesser(guess_alpha)
-null_sol = nullspace_alpha(w_sol)
-end_time = clock.time()
-# plot(scatter=True, limits=(alpha_min,alpha_max), null_path=None, bounds=False)
+    alpha_points = extract_info_from_path(graph, path)
+    alpha_min, alpha_max = build_alpha_constraints(alpha_points, segments)
+    omega_min, omega_max = build_omega_constraints(alpha_min, alpha_max, momentum4)
+    guess_alpha, guess_omega = find_initial_guess(alpha_min, alpha_max, momentum4)
+    w_sol, alpha_sol = init_guesser(guess_alpha, torque_data)
+    null_sol = nullspace_alpha(w_sol)
+    end_time = clock.time()
+    plot(scatter=True, limits=(alpha_min,alpha_max), null_path=null_sol, bounds=False)
 
 
-# from solvers import Solver
-#
-# solver = Solver(torque_data, omega_guess=w_sol)
-# solver.oneshot(n0=0, N=1000)
-# solver = Solver(torque_data, alpha_limits=(alpha_min, alpha_max))
-# old_time = clock.time()
-# omega_sol = solver.sequential(falling, rising, guess_omega, alpha_sol, momentum4)
-# new_time = clock.time()
-# print("Solver time:", new_time - old_time)
-# print(omega_sol.shape)
-# alpha_null_sol = nullspace_alpha(omega_sol)
-# print(alpha_null_sol.shape)
-# plot(scatter=True, limits=(alpha_min,alpha_max), null_path=alpha_null_sol, bounds=True)
+    from solvers import Solver
+    solver = Solver(torque_data, omega_limits=(omega_min, omega_max))
+    # solver = Solver(torque_data, omega_limits=(omega_min, omega_max), omega_guess=w_sol, control_guess = alpha_sol)
+    w_cas_sol, alpha_cas_sol, torque_sol = solver.oneshot_casadi(n0=0, N=8004)
+    # w_cas_sol, alpha_cas_sol, torque_sol = solver.sequential(falling[1:])
+    null_cas_sol = nullspace_alpha(w_cas_sol)
+    plot(scatter=True, limits=(alpha_min,alpha_max), null_path=null_cas_sol, bounds=False)
+
