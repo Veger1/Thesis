@@ -3,7 +3,8 @@ from helper import *
 import networkx as nx
 import matplotlib.pyplot as plt
 from itertools import islice
-import time as clock
+from solvers import Solver
+
 
 def calc_segments(omega_input):
     sign_vector = NULL_R
@@ -368,8 +369,6 @@ def init_guesser(alpha_target, torque):
     return w_guess, alpha_control_guess
 
 def build_omega_constraints(min_constraint, max_constraint, omega_pseudo):
-    w_sol_max = np.zeros_like(omega_pseudo)
-    w_sol_min = np.zeros_like(omega_pseudo)
     pos_mask = (NULL_R > 0)
 
     # Broadcast masks to shape (4,8005)
@@ -455,6 +454,7 @@ class Section:
         return f"Section({self.name}, layers={len(self.layers)})"
 
 if __name__ == "__main__":
+    begin_time = clock.time()
     torque_data = load_data('Data/Slew1.mat')
     low_torque_flag = hysteresis_filter(torque_data, 0.000005, 0.000015)
     low_torque_flag[0:2] = False
@@ -507,14 +507,37 @@ if __name__ == "__main__":
     w_sol, alpha_sol = init_guesser(guess_alpha, torque_data)
     null_sol = nullspace_alpha(w_sol)
     end_time = clock.time()
+    ssp_time = end_time - begin_time
     plot(scatter=True, limits=(alpha_min,alpha_max), null_path=null_sol, bounds=False)
 
 
-    from solvers import Solver
-    solver = Solver(torque_data, omega_limits=(omega_min, omega_max))
+    yeet = Solver(torque_data)
+    yeet.oneshot_casadi(n0=0, N=8004)
+    plot(scatter=True, limits=(alpha_min,alpha_max), null_path=yeet.null_sol, bounds=False)
+
+    ref = Solver(torque_data, omega_limits=(omega_min, omega_max))
     # solver = Solver(torque_data, omega_limits=(omega_min, omega_max), omega_guess=w_sol, control_guess = alpha_sol)
-    w_cas_sol, alpha_cas_sol, torque_sol = solver.oneshot_casadi(n0=0, N=8004)
-    # w_cas_sol, alpha_cas_sol, torque_sol = solver.sequential(falling[1:])
-    null_cas_sol = nullspace_alpha(w_cas_sol)
-    plot(scatter=True, limits=(alpha_min,alpha_max), null_path=null_cas_sol, bounds=False)
+    ref.oneshot_casadi(n0=0, N=8004)
+
+    osl = Solver(torque_data, omega_selective_limits=(omega_min, omega_max))
+    osl.oneshot_casadi(n0=0, N=8004)
+
+    tsl = Solver(torque_data, omega_limits=(omega_min, omega_max), reduce_torque_limits=True)
+    tsl.oneshot_casadi(n0=0, N=8004)
+
+    osl_tsl = Solver(torque_data, omega_selective_limits=(omega_min, omega_max), reduce_torque_limits=True)
+    osl_tsl.oneshot_casadi(n0=0, N=8004)
+
+    og = Solver(torque_data, omega_limits=(omega_min, omega_max), omega_guess=w_sol)
+    og.oneshot_casadi(n0=0, N=8004)
+
+    cg = Solver(torque_data, omega_limits=(omega_min, omega_max), control_guess=alpha_sol)
+    cg.oneshot_casadi(n0=0, N=8004)
+
+    og_cg = Solver(torque_data, omega_limits=(omega_min, omega_max), omega_guess=w_sol, control_guess=alpha_sol)
+    og_cg.oneshot_casadi(n0=0, N=8004)
+
+
+    save_classes_to_mat([ref, osl, tsl, osl_tsl, og, cg, og_cg], f'Data/DAC/slew1/{seed}.mat')
+    # plot(scatter=True, limits=(alpha_min,alpha_max), null_path=solver.null_sol, bounds=False)
 
