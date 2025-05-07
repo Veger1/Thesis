@@ -3,6 +3,7 @@ from rockit import Ocp, MultipleShooting
 import numpy as np
 from sympy import symbols, lambdify
 from config import *
+import time as clock
 
 def solve_ocp(objective_expr, N, num_intervals=1, w_final=None, scaling=1):
     time = float(N / 10)
@@ -11,9 +12,10 @@ def solve_ocp(objective_expr, N, num_intervals=1, w_final=None, scaling=1):
     w_initial = OMEGA_START
     section_length = 200  # Number of points per section
 
-    all_t, all_w_sol, all_alpha_sol, all_T_sol = [], [], [], []
+    all_t, all_w_sol, all_alpha_sol, all_T_sol, all_iter, all_solve_time, all_time = [], [], [], [], [], [], []
 
     for i in range(num_intervals):
+        begin_time = clock.time()
         t0_actual = time * i
         t0_relative = t0_actual % 200
         t0_offset = t0_actual//200*200
@@ -49,6 +51,7 @@ def solve_ocp(objective_expr, N, num_intervals=1, w_final=None, scaling=1):
         ocp.solver('ipopt', SOLVER_OPTS)  # Use IPOPT solver
         ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
         sol = ocp.solve()  # Solve the problem
+        end_time = clock.time()
 
         # Post-processing: Sample solutions for this interval
         ts, w_sol = sol.sample(w, grid='control')
@@ -58,10 +61,18 @@ def solve_ocp(objective_expr, N, num_intervals=1, w_final=None, scaling=1):
 
         ts = ts + t0_offset
 
+        stats = sol.stats
+        solver_time = stats.get("t_proc_total", None)  # Total CPU time
+        iter_count = stats.get("iter_count", None)  # Total number of iterations
+
         all_t.append(ts[:-1])
         all_w_sol.append(w_sol[:-1])  # Last value is unique
         all_alpha_sol.append(alpha_sol[:-1])
         all_T_sol.append(T_rw_sol[:-1])
+        all_solve_time.append(solver_time)
+        all_iter.append(iter_count)
+        all_time.append(end_time - begin_time)
+
 
     # Concatenate the data along the first axis (if they're all 1D arrays)
     all_t = np.concatenate(all_t)
@@ -69,7 +80,7 @@ def solve_ocp(objective_expr, N, num_intervals=1, w_final=None, scaling=1):
     all_alpha_sol = np.concatenate(all_alpha_sol)
     all_T_sol = np.concatenate(all_T_sol)
 
-    return all_t, all_w_sol, all_alpha_sol, all_T_sol
+    return all_t, all_w_sol, all_alpha_sol, all_T_sol, all_iter, all_solve_time, all_time
 
 def fast_solve_ocp(objective_expr, num_intervals, N, time, scaling):
     full_data = load_data('Data/Slew1.mat')

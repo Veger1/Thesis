@@ -37,7 +37,7 @@ params_for_cost = {
 # Define cost function combinations
 cost_combinations = [
     # ["gaussian", "tanh"],
-    # ["gaussian", "speed"],
+    ["gaussian", "speed"],
     # ["tanh", "linear"],
     # ["gaussian", "tanh", "speed"],
     # ["gaussian*time_dependent"],
@@ -115,7 +115,7 @@ try:
         print(f"Running optimization for {cost_name}...")
         if True:  # replace with try, add exception handling
             # Solve optimization
-            t_sol, w_sol, alpha_sol, T_sol = solve_ocp(cost_expr, N, num_intervals=num_intervals)
+            t_sol, w_sol, alpha_sol, T_sol, iter_sol, solve_time_sol, total_time_sol = solve_ocp(cost_expr, N, num_intervals=num_intervals)
             cost, total_cost, cost_graph, omega_axis = calc_cost(w_sol, cost_expr, t_sol)
 
             # Store results
@@ -128,7 +128,11 @@ try:
                 'total_cost': total_cost,
                 'cost_graph': cost_graph,
                 'omega_axis': omega_axis,
-                'cost_expr': str(cost_expr)
+                'cost_expr': str(cost_expr),
+                'total_time': total_time_sol,
+                'solve_time': solve_time_sol,
+                'iter_count': iter_sol,
+
             }
 
             # Save results to a separate file
