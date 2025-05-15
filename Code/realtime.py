@@ -1,22 +1,11 @@
-import numpy as np
+import os
+
 import matplotlib.pyplot as plt
 from scipy.io import savemat
 from sympy import symbols, exp, Abs, tanh, atan, pi
 from config import *
 from repeat_solver import solve_ocp_index
 from helper import *
-
-
-full_data = load_data('Data/Slew1.mat')  # (3, 8004)
-
-total_points = 8004
-w_current, w_initial = OMEGA_START, OMEGA_START
-# w_current = np.random.uniform(-100, 100, (4, 1))
-
-w_sol = np.zeros((4, total_points+1))
-torque_sol = np.zeros((4, total_points+1))
-w_sol[:, 0] = w_current.flatten()
-alpha_sol = np.zeros((1, total_points))
 
 
 def minmax_torque(torque_sc, omega):
@@ -183,6 +172,21 @@ def save(name='output'):
     }
     savemat(f'Data/Realtime/{name}.mat', data_to_save)
 
+def save2(path_base):
+    if not path_base.endswith(".mat"):
+        path_base += ".mat"
+
+    os.makedirs(os.path.dirname(path_base), exist_ok=True)
+
+    mat_data = {
+        "all_w_sol": w_sol.T,
+        "all_T_sol": torque_sol.T,
+        "all_alpha_sol": alpha_sol,
+        "all_t": np.linspace(0, 800, 8005),
+    }
+
+    savemat(path_base, mat_data)
+
 
 def plot():
     plt.plot(w_sol.T)
@@ -213,20 +217,89 @@ def plot_index(solution):
     plt.xlabel('Point')
     plt.show()
 
+def target_nullspace(alpha_target, torque, omega_start, specific_torque_limits=False):
+    N = 8005
+    dt = 0.1
+    w = omega_start
+    alpha_control_guess = np.zeros(N-1)
+    w_guess = np.zeros((4, N))
+    w_guess[:, 0] = w.flatten()
+
+    if specific_torque_limits:
+        alpha_lower, alpha_upper = calc_alpha_torque_limits(torque, 0, N-1)
+        def get_upper_torque_limits(l):
+            return alpha_upper[l]
+        def get_lower_torque_limits(l):
+            return alpha_lower[l]
+    else:
+        def get_upper_torque_limits(l):
+            return 0.1*MAX_TORQUE
+        def get_lower_torque_limits(l):
+            return -0.1*MAX_TORQUE
+
+    for k in range(N-1):
+        T_sc = torque[:, k:k+1]
+        T_rw = R_PSEUDO @ T_sc + NULL_R @ np.array([[0]])
+        der_state = I_INV @ T_rw
+        w_next = w + der_state * dt
+        alpha_null = NULL_R_T @ w_next / 4
+        alpha_null_wanted = alpha_target
+        alpha_diff = alpha_null_wanted - alpha_null
+
+        # T_rw = NULL_R * alpha_diff*IRW/dt
+        alpha_guess = alpha_diff*IRW/dt
+        alpha_guess = np.clip(alpha_guess, get_lower_torque_limits(k), get_upper_torque_limits(k))
+
+        # T_rw = np.clip(T_rw, -0.1*MAX_TORQUE, 0.1*MAX_TORQUE)
+        # der_state = I_INV @ T_rw * alpha_guess
+        der_state = I_INV @ NULL_R * alpha_guess
+        w = w + der_state * dt
+        w_guess[:, k+1] = w.flatten()
+        alpha_control_guess[k] = alpha_diff.item()
+
+    w_sol[:,:] = w_guess
+    return w_guess, alpha_control_guess
+
+full_data = load_data('Data/Slew1.mat')  # (3, 8004)
+total_points = 8004
+w_current, w_initial = OMEGA_START, OMEGA_START
+# w_current = np.random.uniform(-100, 100, (4, 1))
+
+w_sol = np.zeros((4, total_points+1))
+torque_sol = np.zeros((4, total_points+1))
+w_sol[:, 0] = w_current.flatten()
+alpha_sol = np.zeros((1, total_points))
+
 if __name__ == "__main__":
-    solve()
-    save('pseudo')
-    # repeat_ideal_omega(w_sol)
-    # save('squared_omega')
-    # w1 = w_sol.copy()
-    # w2 = repeat_ideal_omega(w_sol)
-    # fig = plt.figure()
-    # plt.plot(w1.T)
-    # fig1 = plt.figure()
-    # plt.plot(w2.T)
-    plt.show()
     full_data = load_data('Data/Slew1.mat')
-    total_momentum(full_data)
+    for run_id in range(1, 20 + 1):
+        print(f"--- Run {run_id} ---")
+        total_points = full_data.shape[1]
+
+        # Random initial condition for w_current
+        w_current = np.random.uniform(-300, 300, (4, 1))  # random start
+        w_initial = w_current.copy()
+
+        # Reset solution arrays
+        w_sol = np.zeros((4, total_points + 1))
+        torque_sol = np.zeros((4, total_points + 1))
+        alpha_sol = np.zeros((1, total_points))
+        w_sol[:, 0] = w_current.flatten()
+
+        # Create directory for this run
+        run_dir = f"runs/run_{run_id}"
+        os.makedirs(run_dir, exist_ok=True)
+
+        solve(pseudo)
+        save2(f"{run_dir}/pseudo")
+
+        # Run and save for min-max
+        solve(minmax_torque)
+        save2(f"{run_dir}/minmax")
+
+        # Run and save for target nullspace
+        target_nullspace(0, full_data, w_initial, specific_torque_limits=True)
+        save2(f"{run_dir}/target_nullspace")
 
 
 
