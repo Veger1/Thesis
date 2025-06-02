@@ -1,8 +1,11 @@
 import numpy as np
 from sympy import symbols, lambdify
-from config import OMEGA_START, R_PSEUDO, IRW, R
+from config import R_PSEUDO, IRW, R, MAX_TORQUE
 from itertools import combinations
 from collections import defaultdict
+from scipy.io import savemat
+import time as clock
+import inspect
 
 def rpm_to_rad(rpm):
     return rpm * 2 * np.pi / 60
@@ -185,6 +188,8 @@ def select_minimum_covering_nodes(inverted_intervals_dict, total_range, initial_
             idx_to_key[idx] = (key, interval)
             idx += 1
 
+    interval_list = [(a, b) for (a, b) in interval_list if b > a + 1]
+
     initial_nodes = set(initial_nodes) if initial_nodes else set()
     uncovered_intervals = set(range(len(interval_list)))
     for node in initial_nodes:
@@ -216,56 +221,63 @@ def select_minimum_covering_nodes(inverted_intervals_dict, total_range, initial_
 
     return sorted(selected_nodes)
 
-def select_covering_nodes(original_intervals, inverted_intervals, total_range, initial_nodes=None):
-    # Step 1: Combine all intervals into one list
-    all_intervals = []
-    interval_map = {}
-    idx = 0
-    for source in [original_intervals, inverted_intervals]:
-        for key, intervals in source.items():
-            for interval in intervals:
-                all_intervals.append(interval)
-                interval_map[idx] = (key, interval)
-                idx += 1
-
-    # Step 2: Remove intervals already covered by initial nodes
-    initial_nodes = set(initial_nodes) if initial_nodes else set()
-    uncovered_intervals = set(range(len(all_intervals)))
-    for node in initial_nodes:
-        for i, (start, end) in enumerate(all_intervals):
-            if i in uncovered_intervals and start < node < end:
-                uncovered_intervals.remove(i)
-
-    # Step 3: Create coverage map (exclude edges)
-    coverage = defaultdict(set)
-    for idx in uncovered_intervals:
-        s, e = all_intervals[idx]
-        for t in range(s + 1, e):  # exclude start and end
-            coverage[t].add(idx)
-
-    selected_nodes = set(initial_nodes)
-
-    # Step 4: Greedy selection (skip edge values)
-    while uncovered_intervals:
-        # Filter valid candidates: t is not on the edge of any interval it covers
-        valid_candidates = {
-            t: ids for t, ids in coverage.items()
-            if all(t != all_intervals[i][0] and t != all_intervals[i][1] for i in ids)
-        }
-        if not valid_candidates:
-            raise ValueError("No valid (non-edge) points left to cover intervals.")
-
-        # Pick t that covers the most uncovered intervals
-        best_t = max(valid_candidates.items(), key=lambda x: len(x[1] & uncovered_intervals))[0]
-        selected_nodes.add(best_t)
-        for i in coverage[best_t]:
-            uncovered_intervals.discard(i)
-
-    return sorted(selected_nodes)
-
 def get_random_start(seed=None):
     if seed is None:
         seed = np.random.randint(0, 10000)
     np.random.seed(seed)
     omega_start = np.random.uniform(-300, 300, (4, 1))
     return omega_start, seed
+
+def save_classes_to_mat(class_list, filename="classes_output.mat"):
+    """
+    Save a list of class instances to a .mat file.
+    Each instance becomes a struct (folder), and its attributes are fields.
+
+    Parameters:
+    - class_list: list of class instances
+    - filename: output .mat filename
+    """
+    mat_data = {}
+
+    for i, cls in enumerate(class_list):
+        class_name = getattr(cls, 'name', f'class_{i}')
+        if class_name in mat_data:
+            class_name += f'_{i}'
+
+        attributes = {}
+        for attr_name in dir(cls):
+            if attr_name.startswith("_"):
+                continue  # skip private/internal
+            attr_value = getattr(cls, attr_name)
+            if inspect.ismethod(attr_value) or inspect.isfunction(attr_value):
+                continue  # skip methods
+
+            try:
+                if attr_value is None:
+                    attributes[attr_name] = np.nan  # or use: [] or 'None'
+                else:
+                    attributes[attr_name] = attr_value
+            except Exception as e:
+                print(f"Skipping {attr_name} of {class_name}: {e}")
+
+        mat_data[class_name] = attributes
+
+        savemat(filename, mat_data)
+    print(f"Saved {len(class_list)} class instances to {filename}")
+
+
+def calc_alpha_torque_limits(torque_data, n0, N):
+    T_fixed = R_PSEUDO @ torque_data[:, n0:n0 + N]
+    T_fixed[[1, 3], :] *= -1
+    T_fixed_pos = T_fixed + MAX_TORQUE
+    T_fixed_neg = T_fixed - MAX_TORQUE
+    mask_max_neg = T_fixed_neg == np.max(T_fixed_neg, axis=0, keepdims=True)
+    mask_min_pos = T_fixed_pos == np.min(T_fixed_pos, axis=0, keepdims=True)
+    T_critical_neg = np.where(mask_max_neg, T_fixed, 0)
+    T_critical_pos = np.where(mask_min_pos, T_fixed, 0)
+    # Collapse each column to one row: the critical values
+    T_critical_neg = np.sum(T_critical_neg, axis=0)  # shape: (N,)
+    T_critical_pos = np.sum(T_critical_pos, axis=0)  # shape: (N,)
+    alpha_upper_bound = MAX_TORQUE - T_critical_neg  # shape: (N,)
+    alpha_lower_bound = -MAX_TORQUE - T_critical_pos  # shape: (N,)
+    return alpha_lower_bound, alpha_upper_bound

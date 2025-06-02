@@ -47,6 +47,14 @@ for method, file in file_paths.items():
         else:
             print(f"⚠️ No solve time found for {file}")
 
+plt.rcParams.update({
+        "font.size": 14,  # Global font size
+        "axes.titlesize": 16,  # Title font size
+        "axes.labelsize": 12,  # Axis label size
+        "xtick.labelsize": 12,  # X tick label size
+        "ytick.labelsize": 12,  # Y tick label size
+        "legend.fontsize": 12,  # Legend font size
+    })
 # Combine and plot total time
 if total_time_data:
     total_df = pd.concat(total_time_data, ignore_index=True)

@@ -57,8 +57,20 @@ def time_stiction_accurate(dataset, limit=None):
                             crossing_value = omega_max
                         else:
                             crossing_value = omega_min
-                    interpolator = interp1d([omega[i, j], omega[i+1, j]], [time[i], time[i + 1]])
-                    crossing_time = interpolator(crossing_value)
+
+                    # ✅ Insert safe interpolation here ↓
+                    w0, w1 = omega[i, j], omega[i + 1, j]
+                    t0, t1 = time[i], time[i + 1]
+                    eps = 1e-12
+
+                    if min(w0, w1) - eps <= crossing_value <= max(w0, w1) + eps:
+                        interpolator = interp1d([w0, w1], [t0, t1])
+                        crossing_time = interpolator(crossing_value)
+                    else:
+                        crossing_time = (t0 + t1) / 2  # or skip or log warning
+
+                    # interpolator = interp1d([omega[i, j], omega[i+1, j]], [time[i], time[i + 1]])
+                    # crossing_time = interpolator(crossing_value)
 
                     if abs(omega[i, j]) < omega_max:
                         # omega[i] is inside, add time from time[i] to crossing
@@ -101,7 +113,7 @@ def omega_squared_sum(dataset):  # Score of 1 signifies average vibration level 
     omega_sqrd_sum = np.zeros(4)
     for i in range(N):
         for j in range(4):
-            omega_sqrd_sum[j] += (omega[i, j] / OMEGA_MAX) ** 2
+            omega_sqrd_sum[j] += (omega[i, j] / OMEGA_MIN) ** 2
     return omega_sqrd_sum
 
 
@@ -120,9 +132,9 @@ def energy(dataset):
     time = data['all_t'].flatten()
     t = time[2] - time[1]
     energy_result = np.zeros(4)
-    for i in range(len(time)):
+    for i in range(len(time)-1):
         for j in range(4):
-            pwr = omega[i, j] * torque[i, j]
+            pwr = omega[i, j] * torque[i, j] *t
             if pwr > 0:
                 energy_result[j] += pwr
     return energy_result
@@ -244,8 +256,66 @@ def count_zero_crossings(dataset):
 
     return zero_crossings
 
-evaluation_functions = [count_zero_crossings, energy, omega_squared_avg, time_stiction_accurate]
-zone = np.array([100, 125, 150])
-save_to_excel(evaluation_functions, 'Data/100s', 'Data/TEST.xlsx', zone)
+def extract_time(dataset):
+    data = loadmat(dataset)
+    solve_time = data['total_time']
+    result = np.sum(solve_time, axis=1)
+    return result
+
+def extract_iterations(dataset):
+    data = loadmat(dataset)
+    iterations = data['iter_count']
+    result = np.sum(iterations, axis=1)
+    return result
+
+def extract_solve_time(dataset):
+    data = loadmat(dataset)
+    solve_time = data['solve_time']
+    result = np.sum(solve_time, axis=1)
+    return result
+
+def extract_components(dataset):
+    data = loadmat(dataset)
+    omega = data['omega_start']
+    nullspace_component = NULL_R @ (NULL_R_T @ omega)
+    orthogonal_component = omega - nullspace_component
+    return float(np.linalg.norm(nullspace_component)), float(np.linalg.norm(orthogonal_component))
+    # return nullspace_component, orthogonal_component
+
+# evaluation_functions = [count_zero_crossings, energy, omega_squared_avg, time_stiction_accurate, extract_time, extract_iterations]
+# zone = np.array([100])
+# save_to_excel(evaluation_functions, 'Data/Auto/slew2_ab', 'Data/Auto/eval2_ab.xlsx', zone)
+
+# print(extract_solve_time('Data/optimisation/guess/500a.mat'))
+# print(extract_solve_time('Data/optimisation/guess/500b.mat'))
+# print(extract_solve_time('Data/optimisation/guess/500c.mat'))
+# print(extract_iterations('Data/optimisation/guess/500a.mat'))
+# print(extract_iterations('Data/optimisation/guess/500b.mat'))
+# print(extract_iterations('Data/optimisation/guess/500c.mat'))
+#
+# print(extract_solve_time('Data/optimisation/guess/500a_bis.mat'))
+# print(extract_solve_time('Data/optimisation/guess/500b_bis.mat'))
+# print(extract_solve_time('Data/optimisation/guess/500c_bis.mat'))
+# print(extract_iterations('Data/optimisation/guess/500a_bis.mat'))
+# print(extract_iterations('Data/optimisation/guess/500b_bis.mat'))
+# print(extract_iterations('Data/optimisation/guess/500c_bis.mat'))
+
+if __name__ == "__main__":
 
 
+    data = 'Data/conventional/pseudo_omega/slew1/19.mat'
+    data = 'Data/OPT/02_zero/slew1/18.mat'
+    yeet = loadmat(data)
+    # print(np.sum(yeet['iter_count']))
+    # print(np.sum(yeet['solve_time']))
+    print(count_zero_crossings(data))
+    print(omega_squared_avg(data))
+    print(energy(data))
+    print(time_stiction_accurate(data, limit=100))
+    print(extract_components(data))
+
+
+    print(sum(count_zero_crossings(data)))
+    print(sum(omega_squared_avg(data)))
+    print(sum(energy(data)))
+    print(sum(time_stiction_accurate(data, limit=100)))

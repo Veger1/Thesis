@@ -49,7 +49,7 @@ tanh_expr = (tanh(k * (w - X))) * 0.5 + (tanh(-k * (w - Y))) * 0.5
 
 Arctangent function, infeasible solution, minimizes too slowly
 \frac{1}{\pi}\arctan\left(k\left(x-X\right)\right)+\frac{1}{\pi}\arctan\left(-k\left(x-Y\right)\right)+1
-arctan_expr = (1 / pi) * atan(k * (w - X)) + (1 / pi) * atan(-k * (w - Y)) + 1
+arctan_expr = (1 / pi) * atan(k *    (w - X)) + (1 / pi) * atan(-k * (w - Y)) + 1
 
 
 gauss_speedXtime_1: c*t

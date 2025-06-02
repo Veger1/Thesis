@@ -65,6 +65,15 @@ metrics = ['Zero Crossings', 'Omega² Avg', 'Energy (J)', 'Stiction Time (s)']
 #     plt.grid(True)
 #     plt.tight_layout()
 #     plt.show()
+
+plt.rcParams.update({
+        "font.size": 14,  # Global font size
+        "axes.titlesize": 16,  # Title font size
+        "axes.labelsize": 12,  # Axis label size
+        "xtick.labelsize": 12,  # X tick label size
+        "ytick.labelsize": 12,  # Y tick label size
+        "legend.fontsize": 12,  # Legend font size
+    })
 for metric in metrics:
     plt.figure(figsize=(10, 5))
     sns.violinplot(
@@ -78,6 +87,8 @@ for metric in metrics:
         hue='Method Label',
         legend=False
     )
+    if metric == 'Zero Crossings':
+        plt.yticks(range(0, 21, 2))
     # plt.title(f'Violin Plot of {metric} Across Methods')
     plt.xticks(rotation=0, ha='center', wrap=True)  # no tilt, wrap text
     plt.xlabel("")

@@ -8,6 +8,8 @@ from sympy import lambdify, symbols, sympify
 from config import *
 from helper import *
 from realtime import overlap_constraint, optimal_alpha, line_constraint, constrained_alpha
+from DAC import calc_segments, alpha_bounds
+import matplotlib.patches as mpatches
 
 
 def plot_cost_function(loaded_data):
@@ -244,15 +246,17 @@ def plot_MPI():
     mpi_data = loadmat('Data/50s/MPI.mat')
     w_sol = mpi_data['all_w_sol']
     mpi_data = loadmat('Data/50s/stic1.mat')
-    plt.plot(mpi_data['all_t'].flatten(), rad_to_rpm(w_sol[:8000, :]))
-    plt.axhline(y=6000, color='r', linestyle='--', label=f'rpm=6000')
-    plt.axhline(y=-6000, color='r', linestyle='--', label=f'rpm=-6000')
-    plt.fill([0, 0, 800, 800], [-300, 300, 300, -300], 'r', alpha=0.1)
+    plt.figure(figsize=(10, 5))
+    plt.plot(mpi_data['all_t'].flatten(), w_sol[:8000, :])
+    plt.axhline(y=OMEGA_MAX, color='black', linestyle='--')
+    plt.axhline(y=-OMEGA_MAX, color='black', linestyle='--', label='Saturation')
+    plt.fill([0, 0, 800, 800], [-OMEGA_MIN, OMEGA_MIN, OMEGA_MIN, -OMEGA_MIN], 'r', alpha=0.3, label="Stiction zone")
     # plt.ylim([-6000, 6000])
     plt.xlabel('Time (s)')
-    plt.ylabel('RPM')
-    plt.title('RPM vs Time')
+    plt.ylabel('Angular velocity (rad/s)')
+    plt.grid()
     plt.legend([r'$\omega$1', r'$\omega$2', r'$\omega$3', r'$\omega$4'])
+    plt.legend()
     plt.show()
 
 
@@ -263,7 +267,7 @@ def plot_input(slew=1):
         slew_data = loadmat('Data/Slew2.mat')
     test_data = slew_data['Test']
     time = np.linspace(0, 800, 8004)
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(1, 1, figsize=(10, 5))
     ax.plot(time, test_data)
     xlim, ylim = ax.get_xlim(), ax.get_ylim()
     formatter = ScalarFormatter(useMathText=True)
@@ -271,7 +275,7 @@ def plot_input(slew=1):
     ax.yaxis.set_major_formatter(formatter)
     plt.xlabel('Time (s)')
     plt.ylabel('Body Frame Torque (Nm)')
-    plt.title('Body Frame Torque vs Time')
+    # plt.title('Body Frame Torque vs Time')
     plt.legend(["Tx", "Ty", "Tz"])
     # plt.fill([100, 100, 200, 200], [-1, 1, 1, -1], 'r', alpha=0.1)
     # plt.fill([300, 300, 400, 400], [-1, 1, 1, -1], 'r', alpha=0.1)
@@ -279,7 +283,7 @@ def plot_input(slew=1):
     # plt.fill([700, 700, 800, 800], [-1, 1, 1, -1], 'r', alpha=0.1)
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
-    # plt.grid()
+    plt.grid()
     # plt.show()
 
 
@@ -583,7 +587,7 @@ def plot_method():
 def plot_path(data):
     # momentum3 = total_momentum(data)
     # momentum4 = R_PSEUDO @ momentum3
-    momentum4 = pseudo_sol(data)
+    momentum4 = pseudo_sol(data, OMEGA_START)
     momentum3 = R @ momentum4
     momentum5 = R_PSEUDO @ momentum3
     solution = loadmat('Data/Realtime/squared_omega.mat')
@@ -624,13 +628,163 @@ def plot_path(data):
     plt.title("Zero speed bands vs time")
     plt.legend()
 
+def plot_pockets(torque_data):
+   # Simulate an 8x8004 array: 4 pairs of (top, bottom) stiction bands over 8004 time steps
+    n_points = 8005
+    n_bands = 4
+    momentum4_with_nullspace = pseudo_sol(torque_data, OMEGA_START)
+    momentum3 = R @ momentum4_with_nullspace
+    momentum4 = R_PSEUDO @ momentum3
+    stiction_array = calc_segments(momentum4)
+
+    # Simulate each band pair as (bottom, top) with some sinusoidal structure
+    time = np.linspace(0, 800, n_points)
+    # stiction_array = np.zeros((2 * n_bands, n_points))
+
+    # Store pocket bounds as (top_limit, bottom_limit, index_band1, index_band2)
+    pockets = []
+
+    # Iterate over all unique band pairs (i < j)
+    for i in range(n_bands):
+        bottom_i = stiction_array[2 * i]
+        top_i = stiction_array[2 * i + 1]
+        for j in range(i + 1, n_bands):
+            bottom_j = stiction_array[2 * j]
+            top_j = stiction_array[2 * j + 1]
+
+            # Find regions where one band's top is below another band's bottom (non-overlapping)
+            mask_ij = top_i < bottom_j
+            mask_ji = top_j < bottom_i
+
+            if np.any(mask_ij):
+                pockets.append({
+                    'top': bottom_j,
+                    'bottom': top_i,
+                    'mask': mask_ij,
+                    'band_pair': (i, j)
+                })
+            if np.any(mask_ji):
+                pockets.append({
+                    'top': bottom_i,
+                    'bottom': top_j,
+                    'mask': mask_ji,
+                    'band_pair': (j, i)
+                })
+
+    # Plotting the pockets over time
+    plt.figure(figsize=(12, 6))
+    for i in range(n_bands):
+        plt.fill_between(time, stiction_array[2 * i], stiction_array[2 * i + 1], alpha=0.3, label=f'Band {i}')
+
+    # Plot pockets
+    for pocket in pockets:
+        top = pocket['top']
+        bottom = pocket['bottom']
+        mask = pocket['mask']
+        plt.fill_between(time[mask], bottom[mask], top[mask], color='black', alpha=0.2)
+
+    plt.title("Stiction Bands and Pockets")
+    plt.xlabel("Time")
+    plt.ylabel("Value")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+def mask_signal_diff(base, signal, tol=1e-6):
+    diff_mask = np.abs(signal - base) > tol
+    signal_masked = np.where(diff_mask, signal, np.nan)
+    return signal_masked
+
+def plot_nullspace(torque_data, n0=0, n=8005, limits=None, null_path=None, bounds=True,
+         show_bands=True, scatter_points=None, start_point=None, momentum=None, legend=False):
+    solution = loadmat('Data/DAC/full_objective/slew1/10000/9.mat')
+    solution = loadmat('Data/OPT/02_zero/slew1/42.mat')
+    # solution = loadmat('Data/Realtime/target/110.mat')
+    omega_start = solution['omega_start']
+    # omega_start = OMEGA_START
+    opt0 = solution['null_sol']
+    # opt0 = nullspace_alpha(solution['all_w_sol'].T)
+    # solution = loadmat('Data/Realtime/target/-110.mat')
+    # opt1 = nullspace_alpha(solution['all_w_sol'].T)
+
+
+    momentum4_with_nullspace = pseudo_sol(torque_data, omega_start)
+    alpha_nullspace = nullspace_alpha(momentum4_with_nullspace[:, 0:1])
+    alpha_nullspace = nullspace_alpha(momentum4_with_nullspace)
+    momentum3 = R @ momentum4_with_nullspace
+    momentum4 = R_PSEUDO @ momentum3
+    segments = calc_segments(momentum4)
+
+    plt.figure(figsize=(10, 6))
+    time = np.linspace(0, 800, 8005)
+    zeros = np.zeros(8005)
+    time_optimal = time[0:opt0.shape[1]]
+    # plt.plot(time, zeros, color='black', linestyle='--', label='Ideal path')
+    plt.plot(time_optimal, opt0.T, color='black', linestyle='--', label=r'Nullspace path')
+    # plt.plot(time_optimal, opt1.T, color='black', linestyle='-.', label=r'Target = -110')
+    # plt.plot(time_optimal, opt2.T, color='orange', linestyle='-.', label=r'Nullspace path')
+    # plt.plot(time_optimal, opt3.T, color='green', linestyle='-.', label=r'Nullspace path')
+    # plt.plot(time_optimal, opt2.T, color='black', linestyle='--', label=r'Pseudo Torque')
+    # plt.plot(time_optimal, opt2.T, color='blue', linestyle='--', label='Min-Max Omega')
+
+    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    if show_bands:
+        for i in range(0, 8, 2):
+            color = colors[i // 2 % len(colors)]  # Cycle through colors
+            avg = (segments[i] + segments[i + 1]) / 2
+            plt.plot(time, avg, color=color)
+            plt.fill_between(time, segments[i], segments[i + 1], color=color, alpha=0.5, label=f'Band {i // 2 + 1}')
+    if scatter_points is not None:
+        for t, alpha, signs in scatter_points:
+            plt.scatter(time[t], alpha, color='red', marker='o')
+            # plt.scatter(time[2002:2003], [0], color='green', marker='x')
+    if start_point is not None:
+        plt.scatter(0, start_point, color='blue', marker='x')
+    if limits is not None:
+        min_limit, max_limit = limits
+        plt.plot(time, max_limit, color='black', linestyle='--', label='Max Constraint')
+        plt.plot(time, min_limit, color='black', label='Min Constraint')
+    if null_path is not None:
+        N = null_path.shape[0]
+        plt.plot(time[0:N], null_path, color='blue', linestyle='--', label='Nullspace Path')
+    if bounds:
+        min_bounds, max_bounds = alpha_bounds(momentum4)
+        plt.plot(time, min_bounds, color='gray', linestyle='--', label='Saturation limits')
+        plt.plot(time, max_bounds, color='gray', linestyle='--')
+    plt.xlabel("Time (s)")
+    plt.ylabel(r'Nullspace component $\left[\mathrm{rad/s}\right]$')
+    # plt.title("Zero speed bands vs time")
+    if legend:
+        plt.legend()
+
+        # handles, labels = plt.gca().get_legend_handles_labels()
+        #
+        # # Add grey patch
+        # grey_patch = mpatches.Patch(color='lightgray', label='Pocket')
+        # handles.append(grey_patch)
+        # labels.append('Pocket')
+        #
+        # # Set updated legend
+        # plt.legend(handles=handles, labels=labels, loc='upper right')
+        plt.grid()
+    plt.show()
 
 if __name__ == "__main__":
     full_data = load_data('Data/Slew1.mat')
-    plot_path(full_data)
-    # plot_input()
+    # plot_path(full_data)
+    # plt.rcParams.update({
+    #     "font.size": 14,  # Global font size
+    #     "axes.titlesize": 16,  # Title font size
+    #     "axes.labelsize": 12,  # Axis label size
+    #     "xtick.labelsize": 12,  # X tick label size
+    #     "ytick.labelsize": 12,  # Y tick label size
+    #     "legend.fontsize": 12,  # Legend font size
+    # })
+    plot_nullspace(full_data, legend=True, bounds=False)
+    # plot_input(2)
     # momentum = pseudo_sol(full_data)
     # plt.plot(momentum.T)
     # plt.ylim([-600,600])
+    # plot_MPI()
     plt.show()
-    plot_MPI()

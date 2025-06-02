@@ -75,11 +75,11 @@ def constrained_alpha(omega):
 def ideal_omega(omega):
     return omega + np.array([[1], [-1], [1], [-1]]) * constrained_alpha(omega)
 
-def solve(calc_alpha_func=pseudo, second_func=None):
+def solve(torque_data, calc_alpha_func=pseudo, second_func=None):
     global w_current
-    low_torque_flag = hysteresis_filter(full_data, 0.000005, 0.000015)
+    low_torque_flag = hysteresis_filter(torque_data, 0.000005, 0.000015)
     for i in range(total_points):
-        T_sc = full_data[:, i].reshape(3, 1)
+        T_sc = torque_data[:, i].reshape(3, 1)
         if second_func is not None and low_torque_flag[i]:
             alpha = second_func(T_sc, w_current).reshape(1, 1)
         else:
@@ -172,21 +172,23 @@ def save(name='output'):
     }
     savemat(f'Data/Realtime/{name}.mat', data_to_save)
 
-def save2(path_base):
+def save_to_mat(path_base, solve_time=0.0):
     if not path_base.endswith(".mat"):
         path_base += ".mat"
 
     os.makedirs(os.path.dirname(path_base), exist_ok=True)
 
     mat_data = {
+        "seed": seed,
+        "omega_start": w_initial,
         "all_w_sol": w_sol.T,
         "all_T_sol": torque_sol.T,
         "all_alpha_sol": alpha_sol,
         "all_t": np.linspace(0, 800, 8005),
+        "solve_time": solve_time,
+        "null_sol": nullspace_alpha(w_sol)
     }
-
     savemat(path_base, mat_data)
-
 
 def plot():
     plt.plot(w_sol.T)
@@ -224,6 +226,7 @@ def target_nullspace(alpha_target, torque, omega_start, specific_torque_limits=F
     alpha_control_guess = np.zeros(N-1)
     w_guess = np.zeros((4, N))
     w_guess[:, 0] = w.flatten()
+    torque_guess = np.zeros((4, N))
 
     if specific_torque_limits:
         alpha_lower, alpha_upper = calc_alpha_torque_limits(torque, 0, N-1)
@@ -253,12 +256,15 @@ def target_nullspace(alpha_target, torque, omega_start, specific_torque_limits=F
         # T_rw = np.clip(T_rw, -0.1*MAX_TORQUE, 0.1*MAX_TORQUE)
         # der_state = I_INV @ T_rw * alpha_guess
         der_state = I_INV @ NULL_R * alpha_guess
-        w = w + der_state * dt
+        w = w_next + der_state * dt
         w_guess[:, k+1] = w.flatten()
+        torque_guess[:, k] = T_rw.flatten() + (NULL_R @ alpha_guess).flatten()
         alpha_control_guess[k] = alpha_diff.item()
 
     w_sol[:,:] = w_guess
-    return w_guess, alpha_control_guess
+    torque_sol[:,:] = torque_guess
+    alpha_sol[:, :] = alpha_control_guess
+    return w_guess, alpha_control_guess, torque_guess
 
 full_data = load_data('Data/Slew1.mat')  # (3, 8004)
 total_points = 8004
@@ -270,41 +276,42 @@ torque_sol = np.zeros((4, total_points+1))
 w_sol[:, 0] = w_current.flatten()
 alpha_sol = np.zeros((1, total_points))
 
+solve(full_data, pseudo)
+run_dir = f"Data/Realtime/pseudo"
+os.makedirs(run_dir, exist_ok=True)
+#
+save_to_mat(f"{run_dir}/torque")
+
 if __name__ == "__main__":
     full_data = load_data('Data/Slew1.mat')
-    for run_id in range(1, 20 + 1):
-        print(f"--- Run {run_id} ---")
+    for seed in range(1, 51):
+        break
+        continue
+        print(f"--- Run {seed} ---")
         total_points = full_data.shape[1]
 
-        # Random initial condition for w_current
-        w_current = np.random.uniform(-300, 300, (4, 1))  # random start
+        # Random initial condition
+        w_current, return_seed = get_random_start(seed=seed)
+        if return_seed != seed:
+            print(f"Seed mismatch: {return_seed} != {seed}")
+            break
         w_initial = w_current.copy()
 
-        # Reset solution arrays
+        # Reset arrays
         w_sol = np.zeros((4, total_points + 1))
         torque_sol = np.zeros((4, total_points + 1))
         alpha_sol = np.zeros((1, total_points))
         w_sol[:, 0] = w_current.flatten()
 
-        # Create directory for this run
-        run_dir = f"runs/run_{run_id}"
-        os.makedirs(run_dir, exist_ok=True)
-
-        solve(pseudo)
-        save2(f"{run_dir}/pseudo")
-
-        # Run and save for min-max
-        solve(minmax_torque)
-        save2(f"{run_dir}/minmax")
-
-        # Run and save for target nullspace
+        # === Pseudoinverse ===
+        begin_time = clock.time()
         target_nullspace(0, full_data, w_initial, specific_torque_limits=True)
-        save2(f"{run_dir}/target_nullspace")
+        solve_time = clock.time() - begin_time
+        save_to_mat(f"Data/conventional/pseudo_omega/slew1/{seed}.mat", solve_time)
 
-
-
-
-
-
-
+        # === Min-Max ===
+        begin_time = clock.time()
+        solve(full_data, minmax_omega)
+        solve_time = clock.time() - begin_time
+        save_to_mat(f"Data/conventional/minmax_omega/slew1/{seed}.mat", solve_time)
 

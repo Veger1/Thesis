@@ -5,6 +5,15 @@ import matplotlib.pyplot as plt
 from itertools import islice
 from solvers import Solver
 
+def cut_data(torque_data):
+    temp_low_torque_flag = hysteresis_filter(torque_data, 0.000005, 0.000015)
+    temp_low_torque_flag[0:2] = False
+    rising, falling = detect_transitions(temp_low_torque_flag)
+    stationary = np.insert(falling - 1, 0, 0)
+    stationary = np.append(stationary, len(temp_low_torque_flag))
+    falling = np.insert(falling, 0, 0)
+    falling = np.append(falling, len(temp_low_torque_flag))  # +1 but works?
+    return temp_low_torque_flag, rising, falling, stationary
 
 def calc_segments(omega_input):
     sign_vector = NULL_R
@@ -92,7 +101,7 @@ def build_graph(sections):
                 G.add_node(node.id, node=node)
                 node_id += 1
     goal_node = NodeOption(alpha=0, base_speed=0, node_type="goal")
-    goal_node.id, goal_node.display_name = "goal_8100_0", "goal"
+    goal_node.id, goal_node.display_name = "goal_8200_0", "goal"
     G.add_node(goal_node.id, node=goal_node)
 
     # Pass 2: Add all edges
@@ -135,7 +144,9 @@ def shortest_path(G, source_ids, target_ids, cost_type="sign_cost"):
     for source in source_ids:
         for target in target_ids:
             try:
+                time1 = clock.time()
                 temp_path = nx.shortest_path(G, source=source, target=target, weight=cost_type)
+                print(clock.time()-time1)
                 temp_cost = nx.path_weight(G, temp_path, weight=cost_type)
                 if temp_cost < best_cost:
                     best_cost = temp_cost
@@ -156,18 +167,18 @@ def get_coord(node_id):
         print(f"Error parsing node ID '{node_id}': {e}")
         return 0, 0
 
-def k_shortest_paths(G, source_ids, target_ids, k, cost_type="sign_cost"):
+def k_shortest_paths(g, source_ids, target_ids, k, cost_type="sign_cost"):
     all_paths = []
 
     for source in source_ids:
         for target in target_ids:
             try:
-                paths_gen = nx.shortest_simple_paths(G, source, target, weight=cost_type)
+                paths_gen = nx.shortest_simple_paths(g, source, target, weight=cost_type)
                 for temp_path in islice(paths_gen, k):
-                    temp_mixed_cost = nx.path_weight(G, temp_path, weight=cost_type)
-                    temp_sign_cost = nx.path_weight(G, temp_path, weight="sign_cost")
-                    temp_vibration_cost = nx.path_weight(G, temp_path, weight="vibration_cost")
-                    all_paths.append((path, temp_mixed_cost, temp_sign_cost, temp_vibration_cost))
+                    temp_mixed_cost = nx.path_weight(g, temp_path, weight=cost_type)
+                    temp_sign_cost = nx.path_weight(g, temp_path, weight="sign_cost")
+                    temp_vibration_cost = nx.path_weight(g, temp_path, weight="vibration_cost")
+                    all_paths.append((temp_path, temp_mixed_cost, temp_sign_cost, temp_vibration_cost))
             except nx.NetworkXNoPath:
                 continue
 
@@ -188,12 +199,14 @@ def plot_shortest_path(graph, path, get_coordinates=None, title="Shortest Path G
     for node in graph.nodes():
         if get_coordinates:
             x, y = get_coordinates(node)
+            # x = x - (x // 2000) * 1000
+            y = 2*y
         else:
             x, y = 0, 0
         pos[node] = (x, y)  # Flip y for nicer top-down plotting
         xs.append(x)
 
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(12, 4))
     nx.draw_networkx_edges(graph, pos, alpha=0.2)
     nx.draw_networkx_nodes(graph, pos, node_size=100, node_color='lightgray')
 
@@ -213,7 +226,7 @@ def plot_shortest_path(graph, path, get_coordinates=None, title="Shortest Path G
         plt.text(x, -5, str(x), rotation=90, fontsize=8, ha='center', va='top')
         plt.axvline(x, color='lightgray', linestyle='--', linewidth=0.5)
 
-    plt.title(title)
+    # plt.title(title)
     plt.axis('off')
     plt.xlabel("Time index or X coordinate")
     plt.tight_layout()
@@ -273,21 +286,36 @@ def build_alpha_constraints(alpha_nodes, bands):
 
     return min_constraints, max_constraints
 
-def plot(n0=0, n=8005, scatter=False, limits=None, null_path=None, bounds=False):
-    fig, ax = plt.subplots(1, 1, figsize=(9, 6))
+def plot(n0=0, n=8005, limits=None, null_path=None, bounds=None,
+         segments=None, scatter_points=None, start_point=None, momentum=None, legend=False, all_scatter_points=None):
+    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
     time = np.linspace(0, 800, 8005)
     zeros = np.zeros(8005)
     # ax.plot(time, zeros, color='black', linestyle='--', label='Ideal path')
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-    for i in range(0, 8, 2):
-        color = colors[i // 2 % len(colors)]  # Cycle through colors
-        avg = (segments[i] + segments[i + 1]) / 2
-        plt.plot(time, avg, color=color)
-        plt.fill_between(time, segments[i], segments[i + 1], color=color, alpha=0.5, label=f'Band {i // 2 + 1}')
-    for t, alpha, signs in alpha_points:
-        if scatter:
+    if segments is not None:
+        for i in range(0, 8, 2):
+            color = colors[i // 2 % len(colors)]  # Cycle through colors
+            avg = (segments[i] + segments[i + 1]) / 2
+            plt.plot(time, avg, color=color)
+            plt.fill_between(time, segments[i], segments[i + 1], color=color, alpha=0.5, label=f'Band {i // 2 + 1}')
+    if scatter_points is not None:
+        for t, alpha, signs in scatter_points:
             plt.scatter(time[t], alpha, color='red', marker='o')
-            plt.scatter(0, alpha_nullspace, color='blue', marker='x')
+            # plt.scatter(time[2002:2003], [0], color='green', marker='x')
+    if all_scatter_points is not None:
+        blue_dots = [689, 2003, 2690, 4004, 5100, 6005, 7101]
+        for section in all_scatter_points:
+            for layer in section.layers:
+                for alpha in layer.alphas:
+                    if layer.time_index == 0:
+                        continue
+                    if layer.time_index in blue_dots:
+                        plt.scatter(time[layer.time_index], alpha, color='blue', marker='o')
+                    else:
+                        plt.scatter(time[layer.time_index], alpha, color='green', marker='o')
+    if start_point is not None:
+        plt.scatter(0, start_point, color='blue', marker='x')
     if limits is not None:
         min_limit, max_limit = limits
         plt.plot(time, max_limit, color='black', linestyle='--', label='Max Constraint')
@@ -295,14 +323,17 @@ def plot(n0=0, n=8005, scatter=False, limits=None, null_path=None, bounds=False)
     if null_path is not None:
         N = null_path.shape[0]
         plt.plot(time[0:N], null_path, color='blue', linestyle='--', label='Nullspace Path')
-    if bounds:
-        min_bounds, max_bounds = alpha_bounds(momentum4)
-        plt.plot(time, min_bounds, color='gray', linestyle='--')
+    if bounds is not None:
+        min_bounds, max_bounds = alpha_bounds(bounds)
+        plt.plot(time, min_bounds, color='gray', linestyle='--', label='Saturation limit')
         plt.plot(time, max_bounds, color='gray', linestyle='--')
     plt.xlabel("Time (s)")
-    plt.ylabel("Nullspace component")
-    plt.title("Zero speed bands vs time")
-    # plt.legend()
+    plt.ylabel(r'Nullspace component $\left[\mathrm{kg{\cdot}m^2/s}\right]$')
+    # plt.title("Zero speed bands vs time")
+    if legend:
+        plt.legend()
+    # plt.xlim(380, 500)  # Zoom in on x-axis between 20 and 40
+    # plt.ylim(-110, 110)
     plt.show()
 
 def find_start_node(sections, base_speed):
@@ -338,13 +369,26 @@ def plot_overlap_intervals(overlaps, node_ids=None):
     plt.tight_layout()
     plt.show()
 
-def init_guesser(alpha_target, torque):
+def init_guesser(alpha_target, torque, omega_start, specific_torque_limits=False):
     N = 8005
     dt = 0.1
-    w = OMEGA_START
+    w = omega_start
     alpha_control_guess = np.zeros(N-1)
     w_guess = np.zeros((4, N))
     w_guess[:, 0] = w.flatten()
+    torque_guess = np.zeros((4, N-1))
+
+    if specific_torque_limits:
+        alpha_lower, alpha_upper = calc_alpha_torque_limits(torque, 0, N-1)
+        def get_upper_torque_limits(l):
+            return alpha_upper[l]
+        def get_lower_torque_limits(l):
+            return alpha_lower[l]
+    else:
+        def get_upper_torque_limits(l):
+            return 0.1*MAX_TORQUE
+        def get_lower_torque_limits(l):
+            return -0.1*MAX_TORQUE
 
     for k in range(N-1):
         T_sc = torque[:, k:k+1]
@@ -357,16 +401,17 @@ def init_guesser(alpha_target, torque):
 
         # T_rw = NULL_R * alpha_diff*IRW/dt
         alpha_guess = alpha_diff*IRW/dt
-        alpha_guess = np.clip(alpha_guess, -0.1*MAX_TORQUE, 0.1*MAX_TORQUE)
+        alpha_guess = np.clip(alpha_guess, get_lower_torque_limits(k), get_upper_torque_limits(k))
 
         # T_rw = np.clip(T_rw, -0.1*MAX_TORQUE, 0.1*MAX_TORQUE)
         # der_state = I_INV @ T_rw * alpha_guess
         der_state = I_INV @ NULL_R * alpha_guess
-        w = w + der_state * dt
+        w = w_next + der_state * dt  # w_next of w
         w_guess[:, k+1] = w.flatten()
         alpha_control_guess[k] = alpha_diff.item()
+        torque_guess[:, k] = (T_rw + NULL_R * alpha_guess).flatten()
 
-    return w_guess, alpha_control_guess
+    return w_guess, alpha_control_guess, torque_guess
 
 def build_omega_constraints(min_constraint, max_constraint, omega_pseudo):
     pos_mask = (NULL_R > 0)
@@ -453,20 +498,11 @@ class Section:
     def __repr__(self):
         return f"Section({self.name}, layers={len(self.layers)})"
 
-if __name__ == "__main__":
-    begin_time = clock.time()
-    torque_data = load_data('Data/Slew1.mat')
-    low_torque_flag = hysteresis_filter(torque_data, 0.000005, 0.000015)
-    low_torque_flag[0:2] = False
-    rising, falling = detect_transitions(low_torque_flag)
-    stationary = np.insert(falling - 1, 0 ,0)
-    stationary = np.append(stationary, len(low_torque_flag))
-    falling = np.insert(falling, 0, 0)
-    falling = np.append(falling, len(low_torque_flag))  # +1 but works?
+def solve(omega_start, torque_data, specific_torque_limits=False, penalty=0):
+    low_torque_flag, rising, falling, stationary = cut_data(torque_data)
 
-
-    momentum4_with_nullspace = pseudo_sol(torque_data, OMEGA_START)
-    alpha_nullspace = nullspace_alpha(momentum4_with_nullspace[:,0:1])
+    momentum4_with_nullspace = pseudo_sol(torque_data, omega_start)
+    alpha_nullspace = nullspace_alpha(momentum4_with_nullspace[:, 0:1])
     momentum3 = R @ momentum4_with_nullspace
     momentum4 = R_PSEUDO @ momentum3
     segments = calc_segments(momentum4)
@@ -476,23 +512,23 @@ if __name__ == "__main__":
     options = alpha_options(momentum4)
     for i, end_index in enumerate(rising):
         start_index = falling[i]
-        stationary_index = stationary[i+1]
-        section_name = f"Section_{i+1}"
+        stationary_index = stationary[i + 1]
+        section_name = f"Section_{i + 1}"
         section = Section(section_name, start_index, end_index, stationary_index, options, momentum4)
         section.populate_section(start_index, end_index, stationary_index, indices)
         problem.append(section)
 
-    source_index = find_start_node(problem, OMEGA_START)  # source_ids = ["Section_1_0_3"]
-    target_index = ["goal_8100_0"]
+    source_index = find_start_node(problem, omega_start)  # source_ids = ["Section_1_0_3"]
+    target_index = ["goal_8200_0"]
     graph = build_graph(problem)
-    assign_mixed_costs(graph, penalty=10000)
+    assign_mixed_costs(graph, penalty=penalty)
     path, mixed_cost, sign_cost, vib_cost = shortest_path(graph, source_index, target_index, cost_type="mixed_cost")
     # plot_shortest_path(graph, path, get_coordinates=get_coord, title="Graph of the Shortest Path")
     # print("Mixed Cost:", mixed_cost)
     # print("Sign Cost:", sign_cost)
     # print("Vibration Cost:", vib_cost)
 
-    # k_paths = k_shortest_paths(graph, source_index, target_index, k=1, cost_type="mixed_cost")
+    # k_paths = k_shortest_paths(graph, path, source_index, target_index, k=1, cost_type="mixed_cost")
     # for i, (path, mixed, sign, vib) in enumerate(k_paths):
     #     print(f"Path {i + 1}:")
     #     print(f"  Nodes: {path}")
@@ -500,44 +536,78 @@ if __name__ == "__main__":
     #     print(f"  Sign Cost: {sign}")
     #     print(f"  Vibration Cost: {vib}")
 
-    alpha_points = extract_info_from_path(graph, path)
-    alpha_min, alpha_max = build_alpha_constraints(alpha_points, segments)
-    omega_min, omega_max = build_omega_constraints(alpha_min, alpha_max, momentum4)
-    guess_alpha, guess_omega = find_initial_guess(alpha_min, alpha_max, momentum4)
-    w_sol, alpha_sol = init_guesser(guess_alpha, torque_data)
-    null_sol = nullspace_alpha(w_sol)
-    end_time = clock.time()
-    ssp_time = end_time - begin_time
-    plot(scatter=True, limits=(alpha_min,alpha_max), null_path=null_sol, bounds=False)
+    temp_alpha_points = extract_info_from_path(graph, path)
+    temp_alpha_min, temp_alpha_max = build_alpha_constraints(temp_alpha_points, segments)
+    temp_omega_min, temp_omega_max = build_omega_constraints(temp_alpha_min, temp_alpha_max, momentum4)
+    temp_guess_alpha, temp_guess_omega = find_initial_guess(temp_alpha_min, temp_alpha_max, momentum4)
+    temp_w_sol, temp_alpha_sol, temp_torque_sol = init_guesser(temp_guess_alpha, torque_data, omega_start, specific_torque_limits=specific_torque_limits)
+    temp_null_sol = nullspace_alpha(temp_w_sol)
+    return (temp_alpha_points, temp_alpha_min, temp_alpha_max, temp_omega_min, temp_omega_max,
+            temp_guess_alpha, temp_guess_omega, temp_w_sol, temp_torque_sol, temp_alpha_sol, temp_null_sol, momentum4, segments, problem)
 
+def save_class_to_mat(classs_instance):
+    data_to_save = {
+        'solve_time': classs_instance.solve_time,
+        'setup_time': classs_instance.setup_time,
+        'iteration_count': classs_instance.iteration_count,
+        'all_w_sol': classs_instance.w_sol.T,
+        'all_alpha_sol': classs_instance.alpha_sol,
+        'all_T_sol': classs_instance.T_rw_sol.T,
+        'null_sol': classs_instance.null_sol,
+        'all_t': classs_instance.temp_time,
+    }
+    savemat('Data/DAC/solver_results.mat', data_to_save)
 
-    yeet = Solver(torque_data)
-    yeet.oneshot_casadi(n0=0, N=8004)
-    plot(scatter=True, limits=(alpha_min,alpha_max), null_path=yeet.null_sol, bounds=False)
+if __name__ == "__main__":
+    data = load_data('Code/Data/Slew1.mat')
+    (alpha_points, alpha_min, alpha_max, omega_min, omega_max, guess_alpha,
+     guess_omega, w_sol, torque_sol, alpha_sol, null_sol, speeds, speed_segments, graph_problem) = solve(OMEGA_START, data, specific_torque_limits=True)
+    # plot(#scatter_points=alpha_points,
+    #      limits=(alpha_min,alpha_max), segments=speed_segments, legend=True, null_path=null_sol)
+    plot(all_scatter_points=graph_problem, segments=speed_segments,
+         start_point=nullspace_alpha(OMEGA_START), legend=True
+         #scatter_points=alpha_points
+         )
 
-    ref = Solver(torque_data, omega_limits=(omega_min, omega_max))
-    # solver = Solver(torque_data, omega_limits=(omega_min, omega_max), omega_guess=w_sol, control_guess = alpha_sol)
-    ref.oneshot_casadi(n0=0, N=8004)
+    # plot(segments=speed_segments, bounds=speeds, legend=True)
+    # _, rising, falling, stationary = cut_data(data)
+    og = Solver(data, OMEGA_START, omega_selective_limits=(omega_min, omega_max), reduce_torque_limits=True)
+    # og = Solver(data, OMEGA_START)
+    #
+    # begin_time = clock.time()
+    og.oneshot_casadi(n0=0, N=8004, torque_on_g=False, omega_on_g=False, penalise_stiction=True)
+    # end_time =
+    # clock.time()
+    # print("Time taken for casadi:", end_time - begin_time)
+    # plot(scatter_points=alpha_points, limits=(alpha_min,alpha_max), null_path=og.null_sol, segments=speed_segments)
+    #
+    # begin_time = clock.time()
+    # og.sequential_rockit_bis()
+    # end_time = clock.time()
+    # print("Time taken for casadi:", end_time - begin_time)
+    # plot(scatter_points=alpha_points, limits=(alpha_min, alpha_max), null_path=og.null_sol, segments=speed_segments)
 
-    osl = Solver(torque_data, omega_selective_limits=(omega_min, omega_max))
-    osl.oneshot_casadi(n0=0, N=8004)
+    # ref = Solver(torque_data, omega_limits=(omega_min, omega_max))
+    # ref.oneshot_casadi(n0=0, N=8004)
+    #
+    # osl = Solver(torque_data, omega_selective_limits=(omega_min, omega_max))
+    # osl.oneshot_casadi(n0=0, N=8004)
+    #
+    # tsl = Solver(torque_data, omega_limits=(omega_min, omega_max), reduce_torque_limits=True)
+    # tsl.oneshot_casadi(n0=0, N=8004)
+    #
+    # osl_tsl = Solver(torque_data, omega_selective_limits=(omega_min, omega_max), reduce_torque_limits=True)
+    # osl_tsl.oneshot_casadi(n0=0, N=8004)
+    #
+    # og = Solver(torque_data, omega_limits=(omega_min, omega_max), omega_guess=w_sol)
+    # og.oneshot_casadi(n0=0, N=8004)
+    #
+    # cg = Solver(torque_data, omega_limits=(omega_min, omega_max), control_guess=alpha_sol)
+    # cg.oneshot_casadi(n0=0, N=8004)
+    #
+    # og_cg = Solver(torque_data, omega_limits=(omega_min, omega_max), omega_guess=w_sol, control_guess=alpha_sol)
+    # og_cg.oneshot_casadi(n0=0, N=8004)
 
-    tsl = Solver(torque_data, omega_limits=(omega_min, omega_max), reduce_torque_limits=True)
-    tsl.oneshot_casadi(n0=0, N=8004)
-
-    osl_tsl = Solver(torque_data, omega_selective_limits=(omega_min, omega_max), reduce_torque_limits=True)
-    osl_tsl.oneshot_casadi(n0=0, N=8004)
-
-    og = Solver(torque_data, omega_limits=(omega_min, omega_max), omega_guess=w_sol)
-    og.oneshot_casadi(n0=0, N=8004)
-
-    cg = Solver(torque_data, omega_limits=(omega_min, omega_max), control_guess=alpha_sol)
-    cg.oneshot_casadi(n0=0, N=8004)
-
-    og_cg = Solver(torque_data, omega_limits=(omega_min, omega_max), omega_guess=w_sol, control_guess=alpha_sol)
-    og_cg.oneshot_casadi(n0=0, N=8004)
-
-
-    save_classes_to_mat([ref, osl, tsl, osl_tsl, og, cg, og_cg], f'Data/DAC/slew1/{seed}.mat')
+    # save_classes_to_mat([ref, osl, tsl, osl_tsl, og, cg, og_cg], f'Data/DAC/slew1/{seed}.mat')
     # plot(scatter=True, limits=(alpha_min,alpha_max), null_path=solver.null_sol, bounds=False)
 

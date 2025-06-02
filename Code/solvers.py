@@ -1,3 +1,4 @@
+import numpy as np
 from rockit import Ocp, MultipleShooting
 from casadi import sum1
 from config import *
@@ -72,6 +73,7 @@ class Solver:
         self.T_rw_sol[:, n0:n0 + N] = T_rw_sol.T[:,:N]
         self.null_sol[n0:n0 + N + 1] = nullspace_alpha(self.w_sol[:, n0:n0 + N + 1])
 
+    @profile
     def oneshot_casadi(self, n0=0, N=1000, omega_initial=None, omega_final=None, torque_on_g=False, omega_on_g=False, penalise_stiction=False):
         start_time = clock.time()
         dt = self.temp_time[n0 + 1] - self.temp_time[n0]
@@ -137,7 +139,6 @@ class Solver:
             # obj += ca.sum1(ca.exp(-0.01 * w_k**2)) * dt  #  Zero crossing
             # obj += 10000000*ca.sumsqr(w_k * T_rw_k) * dt  # Power
             #  Linear plus power is potentially a good idea for high activity phase
-
 
             # Optional: torque constraints
             torque_constraint(alpha_k, T_rw_k, k)
@@ -261,6 +262,9 @@ class Solver:
             w0_guess = w_guess_segment.T.reshape((-1,))  # flatten in correct order
         else:
             w0_guess = np.zeros((4 * (N + 1),))  # fallback
+            # best_guess = R_PSEUDO @ R @ self.w_initial
+            # w0_guess_matrix = np.hstack([best_guess] * (N + 1))  # shape: (4, N+1)
+            # w0_guess = w0_guess_matrix.T.reshape(-1)
 
         # Build alpha guess
         if self.control_guess is not None:

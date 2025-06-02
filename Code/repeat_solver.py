@@ -2,6 +2,7 @@ from casadi import sum1
 from rockit import Ocp, MultipleShooting
 import numpy as np
 from sympy import symbols, lambdify
+from Code.helper import nullspace_alpha
 from config import *
 import time as clock
 
@@ -34,7 +35,11 @@ def solve_ocp(objective_expr, N, num_intervals=1, w_final=None, scaling=1):
         ocp.subject_to(-MAX_TORQUE <= (T_rw <= MAX_TORQUE))  # Add torque constraints
         ocp.subject_to(-OMEGA_MAX <= (w <= OMEGA_MAX))  # Add saturation constraints
         ocp.subject_to(ocp.at_t0(w) == w_initial)
-        ocp.set_initial(w, w_initial)  # Set initial guess
+        # ocp.set_initial(w, w_initial)  # Set initial guess
+        # ocp.set_initial(w, OMEGA_START)  # Set initial guess
+        # ocp.set_initial(w, 0)  # Set initial guess
+        guess_intial = R_PSEUDO @ R @ w_initial
+        ocp.set_initial(w, guess_intial)  # Set initial guess
 
         ocp_t = ocp.t
         w_sym, t_sym = symbols('w t')
@@ -50,6 +55,7 @@ def solve_ocp(objective_expr, N, num_intervals=1, w_final=None, scaling=1):
 
         ocp.solver('ipopt', SOLVER_OPTS)  # Use IPOPT solver
         ocp.method(MultipleShooting(N=N, M=1, intg='rk'))
+        mid_time = clock.time()
         sol = ocp.solve()  # Solve the problem
         end_time = clock.time()
 
@@ -61,15 +67,14 @@ def solve_ocp(objective_expr, N, num_intervals=1, w_final=None, scaling=1):
 
         ts = ts + t0_offset
 
-        stats = sol.stats
-        solver_time = stats.get("t_proc_total", None)  # Total CPU time
+        stats = sol.stats  # Total CPU time
         iter_count = stats.get("iter_count", None)  # Total number of iterations
 
         all_t.append(ts[:-1])
         all_w_sol.append(w_sol[:-1])  # Last value is unique
         all_alpha_sol.append(alpha_sol[:-1])
         all_T_sol.append(T_rw_sol[:-1])
-        all_solve_time.append(solver_time)
+        all_solve_time.append(end_time - mid_time)
         all_iter.append(iter_count)
         all_time.append(end_time - begin_time)
 

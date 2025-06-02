@@ -1,6 +1,7 @@
 import pandas as pd
 from scipy.stats import ttest_rel
 import os
+from scipy.stats import wilcoxon
 
 # File mappings
 file_paths = {
@@ -45,13 +46,19 @@ for method, file in file_paths.items():
             total_time = total_time[:min_len]
             pseudo_subset = pseudo_total[:min_len]
 
-            stat, pval = ttest_rel(total_time, pseudo_subset)
+            # stat, pval = ttest_rel(total_time, pseudo_subset)
+            try:
+                stat, p_val = wilcoxon(total_time, pseudo_subset)
+            except ValueError:
+                stat, p_val = None, None
+
+
             results.append({
                 'Method': method,
                 'Mean Total Time': total_time.mean(),
                 'Mean Diff (method - pseudo)': total_time.mean() - pseudo_mean,
-                'p-value': f"{pval:.1e}",
-                'Significant (p<0.05)': pval < 0.05
+                'p-value': f"{p_val:.1e}",
+                'Significant (p<0.05)': p_val < 0.05
             })
 
 # Final table

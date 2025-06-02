@@ -1,7 +1,7 @@
 from evaluate import *
 
 # Define root path
-root_path = 'Data/compare'
+root_path = 'Data/DAC/compare_k'
 slew_dirs = ['slew1', 'slew2']
 
 

@@ -20,9 +20,10 @@ base_costs = {
 
 # Define parameter ranges for variation
 param_ranges = {
-    "a": [0.1, 0.05, 0.01, 0.005, 0.002, 0.001],  # Vary Gaussian decay rate
+    "a": [0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001],  # Vary Gaussian decay rate
     "k": [1.0, 2.0],  # Vary tanh steepness
-    "b": [1 / 700000, 1 / 350000, 1 / 200000, 1 / 100000],  # Vary speed scaling
+    # "b": [1 / 700000, 1 / 350000, 1 / 200000, 1 / 100000],  # Vary speed scaling
+    "b": [1 / 800000, 1 / 400000, 1 / 200000, 1 / 100000],  # Vary speed scaling
     "c": [0.5, 1, 2]  # Time-dependent scaling
 }
 params_for_cost = {
@@ -41,7 +42,7 @@ cost_combinations = [
     # ["tanh", "linear"],
     # ["gaussian", "tanh", "speed"],
     # ["gaussian*time_dependent"],
-    ["gaussian", "speed*time_dep"]
+    # ["gaussian", "speed*time_dep"]
 ]
 
 # Define optimization parameters
@@ -130,11 +131,10 @@ try:
                 'omega_axis': omega_axis,
                 'cost_expr': str(cost_expr),
                 'total_time': total_time_sol,
-                'solve_time': solve_time_sol,
+                # 'solve_time': solve_time_sol,
                 'iter_count': iter_sol,
 
             }
-
             # Save results to a separate file
             clean_cost_name = cost_name.replace('*', 'X')
             savemat(f'Data/Auto/{clean_cost_name}.mat', results[cost_name])

@@ -36,7 +36,7 @@ def analyze_vs_baseline(df, metric, title_label):
         labels.append(f"{k0}→{k}")
 
     # Plot
-    colors = ['gray' if sig else 'gray' for sig in significant]
+    colors = ['gray' if sig else 'black' for sig in significant]
     plt.figure(figsize=(10, 4))
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     bars = plt.bar(labels, delta_means, color=colors)
@@ -50,7 +50,7 @@ def analyze_vs_baseline(df, metric, title_label):
         base_str = f"μ₀={baseline_mean:.2f}"
         target_str = f"μₖ={mean_target:.2f}"
         full_label = f"{label}\n{base_str}\n{target_str}"
-        # full_label = f"Δμₖ={mean_target-baseline_mean:.2f}"
+        full_label = f"Δμₖ={mean_target-baseline_mean:.2f}"
         va_pos = 'bottom' if delta_means[i] >= 0 else 'top'
         plt.text(i, delta_means[i], full_label, ha='center', va=va_pos, fontsize=9)
 

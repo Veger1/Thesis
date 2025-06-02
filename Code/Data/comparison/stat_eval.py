@@ -1,5 +1,6 @@
 import pandas as pd
 from scipy.stats import ttest_rel
+from scipy.stats import wilcoxon
 
 # Define paths to your method data
 file_paths = {
@@ -37,9 +38,14 @@ for method, df in data.items():
             comp_vals = df.loc[common_idx, metric]
 
             # Paired t-test
-            t_stat, p_val = ttest_rel(comp_vals, base_vals, nan_policy='omit')
+            # t_stat, p_val = ttest_rel(comp_vals, base_vals, nan_policy='omit')
+            try:
+                stat, p_val = wilcoxon(comp_vals, base_vals)
+            except ValueError:
+                stat, p_val = None, None
             mean_diff = (comp_vals - base_vals).mean()
-            significant = p_val < 0.05
+            # significant = p_val < 0.05
+            significant = p_val is not None and p_val < 0.05
 
             results.append({
                 'Compared To': 'pseudo_omega',
@@ -55,4 +61,4 @@ result_df = pd.DataFrame(results)
 print(result_df)
 
 # Optionally save:
-result_df.to_excel("paired_t_test_vs_pseudo.xlsx", index=False)
+result_df.to_excel("wilcoxon_test_vs_pseudo.xlsx", index=False)
