@@ -5,6 +5,22 @@ from config import *
 from helper import *
 import casadi as ca
 
+class IterationPlotter(ca.Callback):
+    def __init__(self, x_var, **kwargs):
+        ca.Callback.__init__(self)
+        self.construct("IterationPlotter", {})
+        self.iterates = []
+        self.x_var = x_var  # Symbolic variable to track
+
+    def get_n_in(self): return 1  # x
+    def get_n_out(self): return 0
+    def get_name_in(self, i): return "x"
+
+    def eval(self, arg):
+        x_val = np.array(arg[0]).flatten()
+        self.iterates.append(x_val)
+        return []
+
 class Solver:
     def __init__(self, data, omega_start, alpha_limits=None, omega_limits=None, omega_guess=None, control_guess=None,
                  omega_selective_limits=None, reduce_torque_limits=False):
@@ -44,9 +60,7 @@ class Solver:
         ocp.subject_to(-OMEGA_MAX <= (w <= OMEGA_MAX))  # Add saturation constraints
         if omega_initial is None:
             ocp.subject_to(ocp.at_t0(w) == self.w_initial)
-            print('First:',self.w_initial)
         else:
-            print('Second:', omega_initial)
             ocp.subject_to(ocp.at_t0(w) == omega_initial.reshape((4,1)))
         # ocp.set_initial(w, self.w_initial)  # Set initial guess
 
@@ -73,7 +87,6 @@ class Solver:
         self.T_rw_sol[:, n0:n0 + N] = T_rw_sol.T[:,:N]
         self.null_sol[n0:n0 + N + 1] = nullspace_alpha(self.w_sol[:, n0:n0 + N + 1])
 
-    @profile
     def oneshot_casadi(self, n0=0, N=1000, omega_initial=None, omega_final=None, torque_on_g=False, omega_on_g=False, penalise_stiction=False):
         start_time = clock.time()
         dt = self.temp_time[n0 + 1] - self.temp_time[n0]
@@ -93,7 +106,6 @@ class Solver:
 
         if penalise_stiction:
             def penalty_stiction(w_k, k):
-                # Example penalty function for stiction
                 return ca.sumsqr(ca.exp(-0.02 * w_k**2)) * dt
         else :
             def penalty_stiction(w_k, k):
@@ -131,16 +143,10 @@ class Solver:
             lbg.append(np.zeros(4))
             ubg.append(np.zeros(4))
 
-            # Objective (example: quadratic on angular velocity)
+            # Objective
             obj += ca.sumsqr(w_k) * dt /100000 # Quadratic on angular velocity
-            # obj += ca.sum1(ca.fabs(w_k)) * dt  # Linear on angular velocity
-            # obj += ca.sumsqr(ca.exp(-0.02 * w_k**2)) * dt  #  Zero crossing
             obj += penalty_stiction(w_k, k)  # Stiction penalty
-            # obj += ca.sum1(ca.exp(-0.01 * w_k**2)) * dt  #  Zero crossing
-            # obj += 10000000*ca.sumsqr(w_k * T_rw_k) * dt  # Power
-            #  Linear plus power is potentially a good idea for high activity phase
 
-            # Optional: torque constraints
             torque_constraint(alpha_k, T_rw_k, k)
 
         # Optional: omega limits
@@ -154,6 +160,7 @@ class Solver:
                     ubg.append(omega_max[:, n0 + k])
             elif self.omega_selective_limits:
                 print('Selective omega limits provided on g:')
+                # Only limit omega on wheel which is constrained.
                 omega_min, omega_max = self.omega_selective_limits
                 mask_lower = np.isclose(np.abs(omega_min), np.abs(OMEGA_MIN), atol=1e-4)
                 mask_upper = np.isclose(np.abs(omega_max), np.abs(OMEGA_MIN), atol=1e-4)
@@ -195,6 +202,15 @@ class Solver:
         x = ca.vertcat(*w_vars, *alpha_vars)
         g = ca.vertcat(*g)
         p = ca.vec(T_sc)
+
+        SOLVER_OPTS = {
+            "print_time": False,  # Suppress overall solver timing
+            "ipopt": {
+                # "print_level": 0,  # Disable IPOPT output
+                "sb": "yes",  # Suppress banner output
+                "iteration_callback": IterationPlotter(x)  # Track iterations
+            }
+        }
 
         # NLP setup
         nlp = {'x': x, 'f': obj, 'g': g, 'p': p}
@@ -255,11 +271,10 @@ class Solver:
         ubx = ca.vertcat(*ubx)
 
         # Initial guess
-        # Build omega guess
         if self.omega_guess is not None:
             print("Omega guess provided")
             w_guess_segment = self.omega_guess[:, n0:n0 + N + 1]  # shape (4, N+1)
-            w0_guess = w_guess_segment.T.reshape((-1,))  # flatten in correct order
+            w0_guess = w_guess_segment.T.reshape((-1,))
         else:
             w0_guess = np.zeros((4 * (N + 1),))  # fallback
             # best_guess = R_PSEUDO @ R @ self.w_initial
@@ -278,10 +293,13 @@ class Solver:
         x0 = ca.DM(np.concatenate([w0_guess, alpha0_guess]))
 
         mid1_time = clock.time()
+
         # Solve
         sol = solver(x0=x0, lbx=lbx, ubx=ubx,
                      lbg=ca.vertcat(*lbg), ubg=ca.vertcat(*ubg),
                      p=ca.vec(self.torque_data[:, n0:n0 + N]))
+
+
         mid2_time = clock.time()
         self.iteration_count = solver.stats()['iter_count']
 
@@ -302,8 +320,6 @@ class Solver:
         self.extrac_time = end_time - mid2_time
 
         self.w_sol[:,n0:n0+N+1] = w_sol.T
-        print(alpha_sol.T.shape)
-        print(self.alpha_sol.shape)
         self.alpha_sol[n0:n0+N] = alpha_sol.T
         self.T_rw_sol[:,n0:n0+N] = T_rw_sol
         self.null_sol[n0:n0+N+1] = nullspace_alpha(self.w_sol[:, n0:n0 + N + 1])
@@ -319,7 +335,6 @@ class Solver:
                 w_start = self.w_sol[:, start_idx:start_idx+1]
                 self.oneshot_casadi(n0=start_idx, N=length, omega_initial=w_start, torque_on_g=torque_on_g, omega_on_g=omega_on_g)
             start_idx += length
-            print('code reached')
 
     def sequential_rockit_bis(self):
         start_idx = 0
@@ -337,7 +352,6 @@ class Solver:
             start_idx = split_indices[i]
             end_idx = split_indices[i + 1]
             torque_len = end_idx - start_idx
-            omega_len = torque_len + 1
             print(f"Segment {i+1}: start_idx = {start_idx}, end_idx = {end_idx}, torque_len = {torque_len}")
             if i ==0:
                 self.oneshot_casadi(n0=start_idx, N=torque_len, torque_on_g=torque_on_g, omega_on_g=omega_on_g)

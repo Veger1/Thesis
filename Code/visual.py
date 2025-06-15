@@ -277,10 +277,6 @@ def plot_input(slew=1):
     plt.ylabel('Body Frame Torque (Nm)')
     # plt.title('Body Frame Torque vs Time')
     plt.legend(["Tx", "Ty", "Tz"])
-    # plt.fill([100, 100, 200, 200], [-1, 1, 1, -1], 'r', alpha=0.1)
-    # plt.fill([300, 300, 400, 400], [-1, 1, 1, -1], 'r', alpha=0.1)
-    # plt.fill([500, 500, 600, 600], [-1, 1, 1, -1], 'r', alpha=0.1)
-    # plt.fill([700, 700, 800, 800], [-1, 1, 1, -1], 'r', alpha=0.1)
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
     plt.grid()
@@ -699,34 +695,20 @@ def mask_signal_diff(base, signal, tol=1e-6):
 def plot_nullspace(torque_data, n0=0, n=8005, limits=None, null_path=None, bounds=True,
          show_bands=True, scatter_points=None, start_point=None, momentum=None, legend=False):
     solution = loadmat('Data/DAC/full_objective/slew1/10000/9.mat')
-    solution = loadmat('Data/OPT/02_zero/slew1/42.mat')
-    # solution = loadmat('Data/Realtime/target/110.mat')
     omega_start = solution['omega_start']
-    # omega_start = OMEGA_START
     opt0 = solution['null_sol']
-    # opt0 = nullspace_alpha(solution['all_w_sol'].T)
-    # solution = loadmat('Data/Realtime/target/-110.mat')
-    # opt1 = nullspace_alpha(solution['all_w_sol'].T)
-
 
     momentum4_with_nullspace = pseudo_sol(torque_data, omega_start)
     alpha_nullspace = nullspace_alpha(momentum4_with_nullspace[:, 0:1])
-    alpha_nullspace = nullspace_alpha(momentum4_with_nullspace)
     momentum3 = R @ momentum4_with_nullspace
     momentum4 = R_PSEUDO @ momentum3
     segments = calc_segments(momentum4)
 
     plt.figure(figsize=(10, 6))
     time = np.linspace(0, 800, 8005)
-    zeros = np.zeros(8005)
     time_optimal = time[0:opt0.shape[1]]
-    # plt.plot(time, zeros, color='black', linestyle='--', label='Ideal path')
     plt.plot(time_optimal, opt0.T, color='black', linestyle='--', label=r'Nullspace path')
-    # plt.plot(time_optimal, opt1.T, color='black', linestyle='-.', label=r'Target = -110')
-    # plt.plot(time_optimal, opt2.T, color='orange', linestyle='-.', label=r'Nullspace path')
-    # plt.plot(time_optimal, opt3.T, color='green', linestyle='-.', label=r'Nullspace path')
-    # plt.plot(time_optimal, opt2.T, color='black', linestyle='--', label=r'Pseudo Torque')
-    # plt.plot(time_optimal, opt2.T, color='blue', linestyle='--', label='Min-Max Omega')
+
 
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
     if show_bands:
@@ -757,30 +739,14 @@ def plot_nullspace(torque_data, n0=0, n=8005, limits=None, null_path=None, bound
     # plt.title("Zero speed bands vs time")
     if legend:
         plt.legend()
-
-        # handles, labels = plt.gca().get_legend_handles_labels()
-        #
-        # # Add grey patch
-        # grey_patch = mpatches.Patch(color='lightgray', label='Pocket')
-        # handles.append(grey_patch)
-        # labels.append('Pocket')
-        #
-        # # Set updated legend
-        # plt.legend(handles=handles, labels=labels, loc='upper right')
         plt.grid()
     plt.show()
+
 
 if __name__ == "__main__":
     full_data = load_data('Data/Slew1.mat')
     # plot_path(full_data)
-    # plt.rcParams.update({
-    #     "font.size": 14,  # Global font size
-    #     "axes.titlesize": 16,  # Title font size
-    #     "axes.labelsize": 12,  # Axis label size
-    #     "xtick.labelsize": 12,  # X tick label size
-    #     "ytick.labelsize": 12,  # Y tick label size
-    #     "legend.fontsize": 12,  # Legend font size
-    # })
+
     plot_nullspace(full_data, legend=True, bounds=False)
     # plot_input(2)
     # momentum = pseudo_sol(full_data)

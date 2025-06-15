@@ -6,6 +6,15 @@ from itertools import islice
 from solvers import Solver
 
 def cut_data(torque_data):
+    """
+    Cuts the torque data into segments based on low torque thresholds and detects transitions.
+    :param torque_data: numpy array of shape (3, N) representing torque data.
+    :return:
+        - temp_low_torque_flag: boolean array indicating low torque segments.
+        - rising: indices where the low torque flag rises.
+        - falling: indices where the low torque flag falls.
+        - stationary: indices representing last index of each interval (~200s).
+    """
     temp_low_torque_flag = hysteresis_filter(torque_data, 0.000005, 0.000015)
     temp_low_torque_flag[0:2] = False
     rising, falling = detect_transitions(temp_low_torque_flag)
@@ -16,10 +25,17 @@ def cut_data(torque_data):
     return temp_low_torque_flag, rising, falling, stationary
 
 def calc_segments(omega_input):
+    """
+    Calculates speed bands based on the input omega.
+    :param omega_input: numpy array of shape (4, N) representing wheel speeds.
+    :return: segment_bis: numpy array of shape (8, N) representing speed bands. Row 1 is upper bound for band 1,
+    row 2 is lower bound for band 1, etc.
+    Code should work for any NULL_R.
+    """
     sign_vector = NULL_R
-    omega = omega_input  # shape (4, N)
+    omega = omega_input
 
-    seg1 = (OMEGA_MIN - omega) * sign_vector  # shape (4, N)
+    seg1 = (OMEGA_MIN - omega) * sign_vector
     seg2 = (-OMEGA_MIN - omega) * sign_vector
 
     segments_bis = np.empty((8, omega.shape[1]))
@@ -37,6 +53,13 @@ def calc_segments(omega_input):
     return segments_bis
 
 def alpha_bounds(omega_input):
+    """
+    Calculates the saturation bounds for alpha based on the input omega.
+    :param omega_input: numpy array of shape (4, N) representing wheel speeds.
+    :return:
+        - alpha_lower: numpy array of shape (N,) representing lower bounds for alpha.
+        - alpha_upper: numpy array of shape (N,) representing upper bounds for alpha.
+    """
     sign_vector = -NULL_R  # shape (4,1)
     signed_omega = omega_input * sign_vector  # shape (4, N)
 
@@ -49,10 +72,18 @@ def alpha_bounds(omega_input):
     return alpha_lower, alpha_upper
 
 def alpha_options(omega_input, reference=0, use_bounds=True):
+    """
+    Calculates the alpha options based on the input omega.
+    :param omega_input: (4, N) numpy array representing wheel speeds.
+    :param reference: Float, Represents the optimal value for alpha.
+    :param use_bounds: Boolean, Use the saturation bounds to limit the alpha options.
+    :return: all_alphas: (N) List of List, each containing the 1 to 5 alpha options for each time step.
+    """
     first = (OMEGA_MIN - omega_input) * NULL_R  # shape (4, N)
     second = (-OMEGA_MIN - omega_input) * NULL_R  # shape (4, N)
     intervals = np.stack((first, second), axis=2)  # shape: (4, N, 2)
     sorted_intervals = np.sort(intervals, axis=2)
+    # Each wheel produces 1 interval [x1, x2] indicating stiction zone. Sorted by start value (lowest value).
 
     if use_bounds:
         lower, upper = alpha_bounds(omega_input)
@@ -62,19 +93,32 @@ def alpha_options(omega_input, reference=0, use_bounds=True):
 
     all_alphas = []
     for j in range(omega_input.shape[1]):
+        # For each time step, merge the intervals if they overlap.
         current_intervals = sorted_intervals[:, j, :]  # shape (4, 2)
         sorted_by_start = current_intervals[np.argsort(current_intervals[:, 0])]
         merged_intervals = []
         for interval in sorted_by_start:
+            # Merge interval if next interval starts before the last one ends.
             if not merged_intervals or merged_intervals[-1][1] < interval[0]:
                 merged_intervals.append(interval)
             else:
                 merged_intervals[-1][1] = max(merged_intervals[-1][1], interval[1])
-        alphas = best_alpha(merged_intervals, reference, use_bounds=use_bounds)
+        alphas = best_alpha(merged_intervals, reference, use_bounds=use_bounds) # See helper.py for best_alpha function
+        # From stiction intervals, calculate the best alpha options
         all_alphas.append(alphas)
     return all_alphas
 
 def calc_indices(bands, flag, rising_ids):
+    """
+    Calculates the indices of the nodes.
+    :param bands: numpy array of shape (8, 8005) representing stiction bands.
+    :param flag: numpy array of shape (8004,) representing low torque flags.
+    :param rising_ids: List of indices where the low torque flag rises.
+    :return:
+        - indices: List of indices where the nodes are located.
+        - inverted_intervals: Dict with keys as band indices and values as lists of inverted intervals.
+        - overlapping_intervals: Dict with keys as tuples of band indices and values as lists of overlapping intervals.
+    """
     crossing_intervals, overlapping_intervals = compute_band_intersections(bands)
     inverted_intervals = invert_intervals(crossing_intervals, 0, len(flag))
     selected_ids = select_minimum_covering_nodes(overlapping_intervals, (0, 8004), initial_nodes=[0] + list(rising_ids))
@@ -82,6 +126,11 @@ def calc_indices(bands, flag, rising_ids):
     return selected_ids, inverted_intervals, overlapping_intervals
 
 def build_graph(sections):
+    """
+    Builds a directed graph from the given sections.
+    :param sections:
+    :return: Directed graph with nodes and edges representing the sections and their layers.
+    """
     G = nx.DiGraph()
     node_id = 0
 
@@ -136,17 +185,28 @@ def build_graph(sections):
     return G
 
 def shortest_path(G, source_ids, target_ids, cost_type="sign_cost"):
+    """
+    Finds the shortest path in a directed graph G from one or more source nodes to one or more target nodes.
+    :param G: networkx.DiGraph, the directed graph to search.
+    :param source_ids: List of source node IDs or a single source node ID.
+    :param target_ids: List of target node IDs or a single target node ID.
+    :param cost_type: String, the edge attribute to use for path cost calculation (default is "sign_cost").
+    :return:
+    - best_path: List of node IDs representing the best path found.
+    - best_cost: Float, the cost of the best path found.
+    - best_sign_cost: Integer, the sign cost of the best path found.
+    - best_vibration_cost: Float, the vibration cost of the best path found.
+    """
     best_path = None
     best_cost = float("inf")
     best_sign_cost = None
     best_vibration_cost = None
 
-    for source in source_ids:
-        for target in target_ids:
+    for source in source_ids: # source_ids can be a list of source nodes
+        for target in target_ids: # target_ids can be a list of target nodes
             try:
                 time1 = clock.time()
                 temp_path = nx.shortest_path(G, source=source, target=target, weight=cost_type)
-                print(clock.time()-time1)
                 temp_cost = nx.path_weight(G, temp_path, weight=cost_type)
                 if temp_cost < best_cost:
                     best_cost = temp_cost
@@ -157,43 +217,7 @@ def shortest_path(G, source_ids, target_ids, cost_type="sign_cost"):
                 continue
     return best_path, best_cost, best_sign_cost, best_vibration_cost
 
-def get_coord(node_id):
-    parts = node_id.split('_')
-    try:
-        layer = int(parts[-2])  # second to last part = layer
-        index = int(parts[-1])  # last part = index
-        return layer, index
-    except Exception as e:
-        print(f"Error parsing node ID '{node_id}': {e}")
-        return 0, 0
-
-def k_shortest_paths(g, source_ids, target_ids, k, cost_type="sign_cost"):
-    all_paths = []
-
-    for source in source_ids:
-        for target in target_ids:
-            try:
-                paths_gen = nx.shortest_simple_paths(g, source, target, weight=cost_type)
-                for temp_path in islice(paths_gen, k):
-                    temp_mixed_cost = nx.path_weight(g, temp_path, weight=cost_type)
-                    temp_sign_cost = nx.path_weight(g, temp_path, weight="sign_cost")
-                    temp_vibration_cost = nx.path_weight(g, temp_path, weight="vibration_cost")
-                    all_paths.append((temp_path, temp_mixed_cost, temp_sign_cost, temp_vibration_cost))
-            except nx.NetworkXNoPath:
-                continue
-
-    # Sort all found paths by the mixed cost and return top k
-    all_paths = sorted(all_paths, key=lambda x: x[1])[:k]
-    return all_paths
-
-def assign_mixed_costs(G, penalty=0):
-    for u, v, data in G.edges(data=True):
-        temp_sign_cost = data.get("sign_cost", 0)
-        temp_vibration_cost = data.get("vibration_cost", 0)
-        mixed = temp_vibration_cost + penalty * temp_sign_cost
-        data["mixed_cost"] = mixed
-
-def plot_shortest_path(graph, path, get_coordinates=None, title="Shortest Path Graph"):
+def plot_shortest_path(graph, path, get_coordinates=None):
     pos = {}
     xs = []
     for node in graph.nodes():
@@ -232,7 +256,68 @@ def plot_shortest_path(graph, path, get_coordinates=None, title="Shortest Path G
     plt.tight_layout()
     plt.show()
 
+def get_coord(node_id):
+    parts = node_id.split('_')
+    try:
+        layer = int(parts[-2])  # second to last part = layer
+        index = int(parts[-1])  # last part = index
+        return layer, index
+    except Exception as e:
+        print(f"Error parsing node ID '{node_id}': {e}")
+        return 0, 0
+
+def k_shortest_paths(g, source_ids, target_ids, k, cost_type="sign_cost"):
+    """
+    Finds the k shortest simple paths in a directed graph g from one or more source nodes to one or more target nodes.
+    :param k:
+    :param G: networkx.DiGraph, the directed graph to search.
+    :param source_ids: List of source node IDs or a single source node ID.
+    :param target_ids: List of target node IDs or a single target node ID.
+    :param k: Integer, the number of shortest paths to find.
+    :param cost_type: String, the edge attribute to use for path cost calculation (default is "sign_cost").
+    :return: List of tuples, each containing:
+        - temp_path: List of node IDs representing the best path found.
+        - temp_cost: Float, the cost of the best path found.
+        - temp_sign_cost: Integer, the sign cost of the best path found.
+        - temp_vibration_cost: Float, the vibration cost of the best path found.
+    """
+    all_paths = []
+
+    for source in source_ids:
+        for target in target_ids:
+            try:
+                paths_gen = nx.shortest_simple_paths(g, source, target, weight=cost_type)
+                for temp_path in islice(paths_gen, k):
+                    temp_mixed_cost = nx.path_weight(g, temp_path, weight=cost_type)
+                    temp_sign_cost = nx.path_weight(g, temp_path, weight="sign_cost")
+                    temp_vibration_cost = nx.path_weight(g, temp_path, weight="vibration_cost")
+                    all_paths.append((temp_path, temp_mixed_cost, temp_sign_cost, temp_vibration_cost))
+            except nx.NetworkXNoPath:
+                continue
+
+    # Sort all found paths by the mixed cost and return top k
+    all_paths = sorted(all_paths, key=lambda x: x[1])[:k]
+    return all_paths
+
+def assign_mixed_costs(G, penalty=0):
+    """
+    Assigns a mixed cost to each edge in the graph G based on the sign cost and vibration cost.
+    :param G: networkx.DiGraph, the directed graph to modify.
+    :param penalty: zero-crossing penalty
+    """
+    for u, v, data in G.edges(data=True):
+        temp_sign_cost = data.get("sign_cost", 0)
+        temp_vibration_cost = data.get("vibration_cost", 0)
+        mixed = temp_vibration_cost + penalty * temp_sign_cost
+        data["mixed_cost"] = mixed
+
 def extract_info_from_path(graph, path):
+    """
+    Extracts time index, alpha, and signs from the nodes in the given path.
+    :param graph:
+    :param path:
+    :return: List of tuples containing (time_index, alpha, signs) for each node in the path.
+    """
     results = []
 
     def get_node_data(node_id):
@@ -249,17 +334,22 @@ def extract_info_from_path(graph, path):
     # Handle the last node specially
     last_node = path[-1]
     last_data = graph.nodes[last_node].get('node')
-    if last_data is None and len(path) >= 2:  # USeless code maybe
-        print("Used")
-        # If last is goal node, look one step back
+    if last_data is None and len(path) >= 2:  # Useless code maybe
         t, alpha = get_node_data(path[-2])
         if t is not None and alpha is not None:
-            print("Appended")
             results.append((t, alpha))
 
     return results
 
 def build_alpha_constraints(alpha_nodes, bands):
+    """
+    Builds the alpha constraints based on the selected path and bands.
+    :param alpha_nodes: List of tuples, each containing (time_index, alpha, signs).
+    :param bands: numpy array of shape (8, N) representing stiction bands.
+    :return:
+        - min_constraints: numpy array of shape (N,) representing minimum constraints for alpha.
+        - max_constraints: numpy array of shape (N,) representing maximum constraints for alpha.
+    """
     N = bands.shape[1]
     min_constraints = np.full(N, -np.inf)
     max_constraints = np.full(N, np.inf)  # Replace with calculated bounds
@@ -329,7 +419,6 @@ def plot(n0=0, n=8005, limits=None, null_path=None, bounds=None,
         plt.plot(time, max_bounds, color='gray', linestyle='--')
     plt.xlabel("Time (s)")
     plt.ylabel(r'Nullspace component $\left[\mathrm{kg{\cdot}m^2/s}\right]$')
-    # plt.title("Zero speed bands vs time")
     if legend:
         plt.legend()
     # plt.xlim(380, 500)  # Zoom in on x-axis between 20 and 40
@@ -337,6 +426,12 @@ def plot(n0=0, n=8005, limits=None, null_path=None, bounds=None,
     plt.show()
 
 def find_start_node(sections, base_speed):
+    """
+    Finds the first node in the first section that matches the desired signs based on the starting speed.
+    :param sections:
+    :param base_speed: numpy array of shape (4, 1) representing the starting speed.
+    :return: String sector name and node ID of the first matching node, or None if no match is found.
+    """
     desired_signs = np.sign(base_speed).flatten()
     first_section = sections[0]
     first_begin_layer = first_section.begin_layer
@@ -346,6 +441,16 @@ def find_start_node(sections, base_speed):
     return None  # No matching node found
 
 def find_initial_guess(min_constraint, max_constraint, omega):
+    """
+    Finds an initial guess for the alpha (nullspace) and omega values based on the given constraints. This finds
+    the optimal value for alpha within the given constraints WITHOUT account for dynamics (limited torque).
+    :param min_constraint: numpy array of shape (N,) representing minimum constraints for alpha.
+    :param max_constraint: numpy array of shape (N,) representing maximum constraints for alpha.
+    :param omega: numpy array of shape (4, N) representing the initial omega values.
+    :return:
+        - alpha_guess: numpy array of shape (N,) representing the initial guess for alpha.
+        - omega_guess: numpy array of shape (4, N) representing the initial guess for omega.
+    """
     alpha_guess = np.clip(0, min_constraint, max_constraint)
     omega_guess = omega + NULL_R @ alpha_guess.reshape(1, -1)
     return alpha_guess, omega_guess
@@ -370,6 +475,17 @@ def plot_overlap_intervals(overlaps, node_ids=None):
     plt.show()
 
 def init_guesser(alpha_target, torque, omega_start, specific_torque_limits=False):
+    """
+    Tracks a target alpha within torque and omega limits while respecting the dynamics of the system.
+    :param alpha_target: numpy array of shape (N,) representing the target alpha momentum values.
+    :param torque: numpy array of shape (3, N-1) representing the torque data.
+    :param omega_start: numpy array of shape (4, 1) representing the starting omega values.
+    :param specific_torque_limits: Boolean, whether to use specific torque limits or the maximum torque.
+    :return:
+        - w_guess: numpy array of shape (4, N) representing the omega values.
+        - alpha_control_guess: numpy array of shape (N-1,) representing the alpha control values.
+        - torque_guess: numpy array of shape (4, N-1) representing the torque values.
+    """
     N = 8005
     dt = 0.1
     w = omega_start
@@ -386,9 +502,9 @@ def init_guesser(alpha_target, torque, omega_start, specific_torque_limits=False
             return alpha_lower[l]
     else:
         def get_upper_torque_limits(l):
-            return 0.1*MAX_TORQUE
+            return MAX_TORQUE
         def get_lower_torque_limits(l):
-            return -0.1*MAX_TORQUE
+            return -MAX_TORQUE
 
     for k in range(N-1):
         T_sc = torque[:, k:k+1]
@@ -403,8 +519,6 @@ def init_guesser(alpha_target, torque, omega_start, specific_torque_limits=False
         alpha_guess = alpha_diff*IRW/dt
         alpha_guess = np.clip(alpha_guess, get_lower_torque_limits(k), get_upper_torque_limits(k))
 
-        # T_rw = np.clip(T_rw, -0.1*MAX_TORQUE, 0.1*MAX_TORQUE)
-        # der_state = I_INV @ T_rw * alpha_guess
         der_state = I_INV @ NULL_R * alpha_guess
         w = w_next + der_state * dt  # w_next of w
         w_guess[:, k+1] = w.flatten()
@@ -414,6 +528,15 @@ def init_guesser(alpha_target, torque, omega_start, specific_torque_limits=False
     return w_guess, alpha_control_guess, torque_guess
 
 def build_omega_constraints(min_constraint, max_constraint, omega_pseudo):
+    """
+    Builds the omega constraints based on the given minimum and maximum constraints.
+    :param min_constraint: numpy array of shape (N,) representing minimum alpha momentum.
+    :param max_constraint: numpy array of shape (N,) representing maximum alpha momentum.
+    :param omega_pseudo: numpy array of shape (4, N) representing the pseudo omega values.
+    :return:
+        - w_sol_min: numpy array of shape (4, N) representing the minimum omega constraints.
+        - w_sol_max: numpy array of shape (4, N) representing the maximum omega constraints.
+    """
     pos_mask = (NULL_R > 0)
 
     # Broadcast masks to shape (4,8005)
@@ -524,17 +647,6 @@ def solve(omega_start, torque_data, specific_torque_limits=False, penalty=0):
     assign_mixed_costs(graph, penalty=penalty)
     path, mixed_cost, sign_cost, vib_cost = shortest_path(graph, source_index, target_index, cost_type="mixed_cost")
     # plot_shortest_path(graph, path, get_coordinates=get_coord, title="Graph of the Shortest Path")
-    # print("Mixed Cost:", mixed_cost)
-    # print("Sign Cost:", sign_cost)
-    # print("Vibration Cost:", vib_cost)
-
-    # k_paths = k_shortest_paths(graph, path, source_index, target_index, k=1, cost_type="mixed_cost")
-    # for i, (path, mixed, sign, vib) in enumerate(k_paths):
-    #     print(f"Path {i + 1}:")
-    #     print(f"  Nodes: {path}")
-    #     print(f"  Mixed Cost: {mixed}")
-    #     print(f"  Sign Cost: {sign}")
-    #     print(f"  Vibration Cost: {vib}")
 
     temp_alpha_points = extract_info_from_path(graph, path)
     temp_alpha_min, temp_alpha_max = build_alpha_constraints(temp_alpha_points, segments)
@@ -559,55 +671,24 @@ def save_class_to_mat(classs_instance):
     savemat('Data/DAC/solver_results.mat', data_to_save)
 
 if __name__ == "__main__":
-    data = load_data('Code/Data/Slew1.mat')
+    data = load_data('Data/Slew1.mat')
     (alpha_points, alpha_min, alpha_max, omega_min, omega_max, guess_alpha,
      guess_omega, w_sol, torque_sol, alpha_sol, null_sol, speeds, speed_segments, graph_problem) = solve(OMEGA_START, data, specific_torque_limits=True)
-    # plot(#scatter_points=alpha_points,
-    #      limits=(alpha_min,alpha_max), segments=speed_segments, legend=True, null_path=null_sol)
-    plot(all_scatter_points=graph_problem, segments=speed_segments,
-         start_point=nullspace_alpha(OMEGA_START), legend=True
-         #scatter_points=alpha_points
-         )
+    plot(#scatter_points=alpha_points,
+         limits=(alpha_min,alpha_max), segments=speed_segments, legend=True, null_path=null_sol)
+    #plot(all_scatter_points=graph_problem, segments=speed_segments,
+     #    start_point=nullspace_alpha(OMEGA_START), legend=True
+         #scatter_points=alpha_points)
 
     # plot(segments=speed_segments, bounds=speeds, legend=True)
     # _, rising, falling, stationary = cut_data(data)
-    og = Solver(data, OMEGA_START, omega_selective_limits=(omega_min, omega_max), reduce_torque_limits=True)
+    # og = Solver(data, OMEGA_START, omega_selective_limits=(omega_min, omega_max), reduce_torque_limits=True)
     # og = Solver(data, OMEGA_START)
     #
     # begin_time = clock.time()
-    og.oneshot_casadi(n0=0, N=8004, torque_on_g=False, omega_on_g=False, penalise_stiction=True)
+    # og.oneshot_casadi(n0=0, N=8004, torque_on_g=False, omega_on_g=False, penalise_stiction=True)
     # end_time =
     # clock.time()
     # print("Time taken for casadi:", end_time - begin_time)
     # plot(scatter_points=alpha_points, limits=(alpha_min,alpha_max), null_path=og.null_sol, segments=speed_segments)
-    #
-    # begin_time = clock.time()
-    # og.sequential_rockit_bis()
-    # end_time = clock.time()
-    # print("Time taken for casadi:", end_time - begin_time)
-    # plot(scatter_points=alpha_points, limits=(alpha_min, alpha_max), null_path=og.null_sol, segments=speed_segments)
-
-    # ref = Solver(torque_data, omega_limits=(omega_min, omega_max))
-    # ref.oneshot_casadi(n0=0, N=8004)
-    #
-    # osl = Solver(torque_data, omega_selective_limits=(omega_min, omega_max))
-    # osl.oneshot_casadi(n0=0, N=8004)
-    #
-    # tsl = Solver(torque_data, omega_limits=(omega_min, omega_max), reduce_torque_limits=True)
-    # tsl.oneshot_casadi(n0=0, N=8004)
-    #
-    # osl_tsl = Solver(torque_data, omega_selective_limits=(omega_min, omega_max), reduce_torque_limits=True)
-    # osl_tsl.oneshot_casadi(n0=0, N=8004)
-    #
-    # og = Solver(torque_data, omega_limits=(omega_min, omega_max), omega_guess=w_sol)
-    # og.oneshot_casadi(n0=0, N=8004)
-    #
-    # cg = Solver(torque_data, omega_limits=(omega_min, omega_max), control_guess=alpha_sol)
-    # cg.oneshot_casadi(n0=0, N=8004)
-    #
-    # og_cg = Solver(torque_data, omega_limits=(omega_min, omega_max), omega_guess=w_sol, control_guess=alpha_sol)
-    # og_cg.oneshot_casadi(n0=0, N=8004)
-
-    # save_classes_to_mat([ref, osl, tsl, osl_tsl, og, cg, og_cg], f'Data/DAC/slew1/{seed}.mat')
-    # plot(scatter=True, limits=(alpha_min,alpha_max), null_path=solver.null_sol, bounds=False)
 

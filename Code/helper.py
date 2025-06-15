@@ -14,22 +14,23 @@ def rad_to_rpm(rad):
     return rad * 60 / (2 * np.pi)
 
 def convert_expr(ocp, objective_expr, w):
+    """
+    Convert the objective expression to a CasADi-compatible function.
+    """
     ocp_t = ocp.t
     w_sym, t_sym = symbols('w t')
     objective_expr_casadi = lambdify((w_sym, t_sym), objective_expr, 'numpy')
     objective_expr_casadi = objective_expr_casadi(w, ocp_t)
     return objective_expr_casadi
 
-def exponential_moving_average(signal, alpha=0.1):
-    """Apply exponential moving average to smooth the signal."""
-    smoothed = np.zeros_like(signal)
-    smoothed[:, 0] = signal[:, 0]  # Initialize with first value
-    for i in range(1, signal.shape[1]):
-        smoothed[:, i] = alpha * signal[:, i] + (1 - alpha) * smoothed[:, i-1]
-    return smoothed
-
 def hysteresis_filter(signal, low_threshold, high_threshold):
-    """Apply hysteresis to prevent rapid switching."""
+    """
+    Apply hysteresis filtering to the signal to detect low torque intervals.
+    :param signal: numpy array (M, N)
+    :param low_threshold: (float)
+    :param high_threshold: (float)
+    :return: boolean array (N) indicating low torque intervals
+    """
     flag = np.zeros(signal.shape[1], dtype=bool)
     active = False  # Start with no low torque detection
 
@@ -42,6 +43,13 @@ def hysteresis_filter(signal, low_threshold, high_threshold):
     return flag
 
 def detect_transitions(signal):
+    """
+    Detect rising and falling edges in a boolean signal.
+    :param signal: numpy array (N,) of boolean values
+    :return:
+        - rising_edges: List of indices of rising edges
+        - falling_edges: List of indices of falling edges
+    """
     signal = np.array(signal, dtype=bool)  # Ensure it's a boolean NumPy array
     diff_signal = np.diff(signal.astype(int))  # Convert to int and compute difference
 
@@ -51,17 +59,18 @@ def detect_transitions(signal):
     return rising_edges, falling_edges
 
 def pseudo_sol(data, omega_start):
+    """
+    Calculate the pseudoinverse solution for the given data and initial omega vector.
+    :param data: numpy array of shape (3, N) representing the torque data
+    :param omega_start: numpy array of shape (4, 1) representing the initial omega vector
+    :return: omega_sol: numpy array of shape (4, N+1) with the solution
+    """
     length = data.shape[1]
     omega_sol = np.zeros((4, length + 1))
     omega_sol[:, 0] = omega_start.flatten()
     for i in range(length):
         omega_sol[:, i + 1] = (omega_sol[:, i].reshape((4,1)) + 0.1 * R_PSEUDO @ data[:, i].reshape(3, 1) / IRW).flatten()
     return omega_sol
-
-def total_momentum(data):
-    omega_sol = pseudo_sol(data)
-    momentum = R @ omega_sol
-    return momentum
 
 def nullspace_alpha(data):
     length = data.shape[1]
@@ -71,6 +80,13 @@ def nullspace_alpha(data):
     return alpha
 
 def best_alpha(merged_intervals, alpha=0, use_bounds=False):
+    """
+    Invert the merged intervals and find the best alpha value within each inverted interval.
+    :param merged_intervals: List of merged intervals, e.g. [[-3, 0], [1, 4]]
+    :param alpha: Float, the best value for alpha
+    :param use_bounds: Boolean, to include saturation or not
+    :return: result: List of best alpha values
+    """
     inverted_intervals = []
     for i, interval in enumerate(merged_intervals):
         if i == 0 and not use_bounds:
@@ -103,6 +119,13 @@ def best_alpha(merged_intervals, alpha=0, use_bounds=False):
     return result
 
 def compute_band_intersections(stacked_bands):
+    """
+    Compute the intersections of bands in a stacked array of bands.
+    :param stacked_bands: numpy array of shape (8, N) where each 2 rows represents upper and lower bound of stiction band
+    :return:
+        - overlaps_with_crossing: dict of overlapping bands with crossing
+        - overlaps_without_crossing: dict of overlapping bands without crossing
+    """
     assert stacked_bands.shape[0] == 8
     N = stacked_bands.shape[1]
     num_bands = 4
@@ -110,6 +133,7 @@ def compute_band_intersections(stacked_bands):
     overlaps_with_crossing = {}
     overlaps_without_crossing = {}
     for i, j in combinations(range(num_bands), 2):
+        # Pairwise comparison between bands i and j, for a total of 6 comparisons
         lower_i, upper_i = sorted_bands[i, 0], sorted_bands[i, 1]
         lower_j, upper_j = sorted_bands[j, 0], sorted_bands[j, 1]
 
@@ -147,6 +171,13 @@ def compute_band_intersections(stacked_bands):
     return overlaps_with_crossing, overlaps_without_crossing
 
 def invert_intervals(overlap_intervals, total_start_idx, total_end_idx):
+    """
+    Invert the intervals in the overlap_intervals dictionary.
+    :param overlap_intervals: Dict with keys as tuples of band indices and values as lists of overlapping intervals.
+    :param total_start_idx: 0
+    :param total_end_idx: 8004
+    :return: inverted_dict: Dict with keys as band indices and values as lists of inverted intervals.
+    """
     inverted_dict = {}
 
     for key, intervals in overlap_intervals.items():
@@ -179,6 +210,14 @@ def invert_intervals(overlap_intervals, total_start_idx, total_end_idx):
     return inverted_dict
 
 def select_minimum_covering_nodes(inverted_intervals_dict, total_range, initial_nodes=None):
+    """
+    Select the minimum set of nodes that cover all intervals in the inverted_intervals_dict.
+    :param inverted_intervals_dict: dictionary where keys are band indices and values are lists of inverted intervals.
+    :param total_range: 0
+    :param initial_nodes: 8004
+    :param initial_nodes: List of initial nodes to start the coverage from.
+    :return: selected_nodes: List of selected nodes that cover all intervals.
+    """
     interval_list = []
     idx_to_key = {}
     idx = 0
@@ -222,51 +261,29 @@ def select_minimum_covering_nodes(inverted_intervals_dict, total_range, initial_
     return sorted(selected_nodes)
 
 def get_random_start(seed=None):
+    """
+    Generate a random start for the omega vector.
+    :param seed: integer, optional
+    :return:
+        - omega_start: numpy array of shape (4, 1) with random values
+        - seed: integer, the seed used for random generation
+    """
     if seed is None:
         seed = np.random.randint(0, 10000)
     np.random.seed(seed)
     omega_start = np.random.uniform(-300, 300, (4, 1))
     return omega_start, seed
 
-def save_classes_to_mat(class_list, filename="classes_output.mat"):
-    """
-    Save a list of class instances to a .mat file.
-    Each instance becomes a struct (folder), and its attributes are fields.
-
-    Parameters:
-    - class_list: list of class instances
-    - filename: output .mat filename
-    """
-    mat_data = {}
-
-    for i, cls in enumerate(class_list):
-        class_name = getattr(cls, 'name', f'class_{i}')
-        if class_name in mat_data:
-            class_name += f'_{i}'
-
-        attributes = {}
-        for attr_name in dir(cls):
-            if attr_name.startswith("_"):
-                continue  # skip private/internal
-            attr_value = getattr(cls, attr_name)
-            if inspect.ismethod(attr_value) or inspect.isfunction(attr_value):
-                continue  # skip methods
-
-            try:
-                if attr_value is None:
-                    attributes[attr_name] = np.nan  # or use: [] or 'None'
-                else:
-                    attributes[attr_name] = attr_value
-            except Exception as e:
-                print(f"Skipping {attr_name} of {class_name}: {e}")
-
-        mat_data[class_name] = attributes
-
-        savemat(filename, mat_data)
-    print(f"Saved {len(class_list)} class instances to {filename}")
-
-
 def calc_alpha_torque_limits(torque_data, n0, N):
+    """
+    Calculate reduced set of alpha constraints based on torque data.
+    :param torque_data: numpy array of shape (3, 8004) of torque data
+    :param n0: beginning index for the torque data slice
+    :param N: length of the torque data slice
+    :return:
+        - alpha_lower_bound: numpy array of shape (N,) with lower bounds for alpha
+        - alpha_upper_bound: numpy array of shape (N,) with upper bounds for alpha
+    """
     T_fixed = R_PSEUDO @ torque_data[:, n0:n0 + N]
     T_fixed[[1, 3], :] *= -1
     T_fixed_pos = T_fixed + MAX_TORQUE
