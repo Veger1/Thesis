@@ -1,0 +1,80 @@
+- Input
+    T_body = "Slew1.mat" (3,8000)
+    Omega_start (4,1)
+    R configuration matrix (3,4)
+    dt = 0.1 s
+
+1) Projection
+    - Remove nullspace component from omega_start
+    - T_pseudo = R' * T_body
+    - For loop to integrate omega_dot = I^-1 T_pseudo
+        - omega = omega + omega_dot * dt
+
+2) Intersection / Overlaps (REWORK, not robust for all cases)
+    - For each band pair:
+        - Check for overlap:
+            - A_k = B_k + C_k * alpha_k
+            - sum of radii of bands > distance between centers
+            - radii = f_min / abs(C_k)
+            - center: alpha_k = - B_k / C_k
+            - abs(alpha_i - alpha_j) < (r_i + r_j)
+            - Gives mask of overlapping bands (6,N)
+
+        - Check which overlaps correspond to which region:
+            - For 4 wheels there are at most 5 regions per layer
+            - Top and bottom region are half open intervals
+            - If overlap is on top or bottom region, mark is a top or bottom overlap
+            - Else, mark as middle region overlap
+        - Check for intersection:
+            - If signs of alpha_k change: intersection
+            - Else: no intersection
+        - Invert intersection mask to get free regions
+    - Result:
+        3 x
+        - Overlap mask (8001,1)
+        - Free region mask (8001,1)
+
+3) Layer selection:
+    - Fixed layers:
+        - t0, t_end, t_change where t_change means times where operation mode changes
+    - Set covering:
+        - Greedy algorithm to select layers that covers the most free regions with least layers.
+    - Result:
+        - Selected layers (N_layers, 1)
+
+4) Build graph:
+    - For each layer:
+        - Build intervals of allowable regions from B_k, C_k, f_min ( as function of alpha_k)
+        - Select nodes:
+            - In each interval, select solution closest to alpha_k = 0
+            - Store omega_k, signs for each node
+        - Prune nodes that are outside saturation limits
+    - Connect nodes to previous layer nodes:
+        - Cost:
+            - Number of zero crossings between two nodes
+            - omega_k squared of the target node
+
+5) Search graph:
+    - Dijkstra's algorithm to find lowest cost path from first to last layer
+    - Result:
+        - Sequence of nodes (N_layers, 1)
+
+6) Construct constraints:
+    - For each edge in the path:
+        - Check signs of the two nodes
+        - If signs are the same:
+            - Constrain that wheel to not cross stiction zone.
+
+7) Followed ideal path
+    - For each time step:
+        - Project T_body to T_rw
+        - Add T_rw + T_null to control solution towards ideal path
+        - Constrain to:
+            - Not exceed T_max
+            - Not cross stiction bands where not allowed        -
+        - Integrate omega_dot = I^-1 T_constrained
+        - omega = omega + omega_dot * dt
+    - Result:
+        - omega_actual (3,8000)
+        - T_rw_actual (4,8000)
+        - T_null (4,8000)
