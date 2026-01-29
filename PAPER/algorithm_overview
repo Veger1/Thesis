@@ -78,3 +78,11 @@
         - omega_actual (3,8000)
         - T_rw_actual (4,8000)
         - T_null (4,8000)
+
+Evaluate:
+- Energy x
+- Omega squared sum x
+- Number of zero crossings x
+- Number of layers used
+- Time spent in stiction bands x
+- Computation time x
