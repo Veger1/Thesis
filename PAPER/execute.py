@@ -1,5 +1,7 @@
-from algorithm import *
+import numpy as np
 
+from algorithm import *
+from metrics import *
 
 def run():
     t0 = time.perf_counter()
@@ -73,15 +75,89 @@ def safe_run():
         return None
     return timing_run, result_run, layers
 
+def evaluate(w_sol, alpha_sol, torque_sol, layers):
+    stiction_time = time_stiction_accurate(w_sol, OMEGA_MIN, dt=0.1)
+    energy_metrics = energy(w_sol, torque_sol, dt=0.1)
+    zero_crossing = count_zero_crossings(w_sol)
+    omega_squared = omega_squared_sum(w_sol, OMEGA_MIN)
+    number_of_layers = len(layers)
+    return stiction_time, energy_metrics, zero_crossing, omega_squared, number_of_layers
+
+def run_pseudo():
+    time0 = time.perf_counter()
+    opt_sol = np.zeros(8004)
+    torque_psd = R_PSEUDO @ data  # (4, N)
+    torque_lim = calc_alpha_torque_limits(torque_psd)
+    time1 = time.perf_counter()
+    forward_integration_optimal(OMEGA_START, opt_sol, torque_lim, torque_psd, dt=0.1)
+    time2 = time.perf_counter()
+    timing = {"total_time": time2 - time0, "forward_integration_optimal": time2 - time1, "constraints": time1 - time0}
+    return timing, (w_sol, alpha_sol, torque_sol), None
+
+
+def minmax_alpha_from_wpseudo(w_pseudo):
+    """
+    Fast min-max alpha assuming |NULL_R_i| are identical.
+
+    :param w_pseudo: (4,N)
+    :return: alpha_optimal (N,)
+    """
+
+    N_vec = NULL_R.ravel()
+
+    # alpha_null = -w / N
+    alpha_null = -w_pseudo / N_vec[:, None]
+
+    alpha_optimal = 0.5 * (
+            np.max(alpha_null, axis=0)
+            + np.min(alpha_null, axis=0)
+    )
+
+    return alpha_optimal
+
+def solve():
+    N = 8004
+    w_sol = np.zeros((4, N+1))
+    alpha_sol = np.zeros(N)
+    torque_sol = np.zeros((4, N))
+
+    w_current = OMEGA_START.flatten()
+    w_sol[:, 0] = w_current
+
+    for i in range(N):
+        T_sc = data[:, i]
+        alpha = minmax_omega(T_sc, w_current, dt=0.1)
+        alpha_sol[i] = alpha
+        T_rw = R_PSEUDO @ T_sc + NULL_R @ alpha
+
+        der_state = I_INV @ T_rw
+        w_current += der_state * 0.1
+        w_sol[:, i+1] = w_current.flatten()
+        torque_sol[:, i] = T_rw.flatten()
+
+def minmax_omega(torque_sc, omega, dt=0.1):
+    nominator = - omega - dt * I_INV @ R_PSEUDO @ torque_sc
+    denominator = dt * I_INV @ NULL_R
+    alpha_null = nominator / denominator
+    alpha_best = (max(alpha_null) + min(alpha_null)) / 2
+    return alpha_best
+
+def pseudo_omega(torque_sc, omega, dt=0.1):
+    opt_alpha  = (- omega[0] + omega[1] - omega[2] + omega[3])/4
+
+    return - dt * I_INV @ R_PSEUDO @ torque_sc + NULL_R * alpha
 
 timer = 0.0
 success = 0
-for _ in range(500):
+for _ in range(1):
 
     OMEGA_START = np.random.uniform(-300, 300, (4, 1))
     OMEGA_START_PSEUDO = R_PSEUDO @ R @ OMEGA_START
     OMEGA_START_NULL = OMEGA_START - OMEGA_START_PSEUDO
     timing, result, layer_list = safe_run()
+    metrics = evaluate(result[0], result[1], result[2], layer_list)
+    print("Metrics: Stiction Time:", metrics[0], "Energy:", metrics[1], "Zero Crossings:", metrics[2],
+          "Omega Squared Sum:", metrics[3], "Number of Layers:", metrics[4])
     if timing is not None:
         timer += timing["total_time"]
         success += 1
