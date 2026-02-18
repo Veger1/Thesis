@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 from scipy.io import loadmat
 import numpy as np
 from scipy.linalg import null_space
@@ -18,7 +19,7 @@ R = np.array([[np.sin(BETA), 0, -np.sin(BETA), 0], # (3, 4)
                   [np.cos(BETA), np.cos(BETA), np.cos(BETA), np.cos(BETA)]])
 
 R_PSEUDO = np.linalg.pinv(R)  # Pseudo-inverse (4, 3)
-NULL_R = null_space(R) * 2  # Null space (4, 1)
+NULL_R = null_space(R)  # Null space (4, 1)
 NULL_R_T = NULL_R.T  # Transpose of the null space (1, 4)
 
 RPM_MAX = 6000
@@ -464,7 +465,7 @@ def forward_integration_optimal(w_start, alpha_optimal, torque_limits, torque_4d
         Tracks optimal nullspace coordinate alpha while respecting torque limits.
         """
 
-    N = torque_4d.shape[1]
+    N = torque_4d.shape[1]  # 8004
 
     w_solution = np.zeros((4, N + 1))
     alpha_control = np.zeros(N)
@@ -472,8 +473,6 @@ def forward_integration_optimal(w_start, alpha_optimal, torque_limits, torque_4d
 
     w_current = w_start.flatten()
     w_solution[:, 0] = w_current
-
-    NULL_R_flat = NULL_R.flatten()  # (4,)
 
     torque_min, torque_max = torque_limits
 
@@ -498,7 +497,7 @@ def forward_integration_optimal(w_start, alpha_optimal, torque_limits, torque_4d
         # alpha_next = alpha_current + gamma * alpha_T * dt
         # => alpha_T = (alpha_desired - alpha_current) / (gamma * dt)
         # -------------------------------------------------
-        alpha_diff = alpha_optimal[k] - alpha_current
+        alpha_diff = alpha_optimal[k+1] - alpha_current
         null_torque_desired = alpha_diff * inv_gamma_dt
 
         # -------------------------------------------------
@@ -523,6 +522,29 @@ def forward_integration_optimal(w_start, alpha_optimal, torque_limits, torque_4d
 
     return w_solution, alpha_control, torque_solution
 
+def plot():
+
+    band_top = band_center + band_radii
+    band_bottom = band_center - band_radii
+
+    w_null_sol = w_sol.T @ NULL_R
+    w_pseudo_sol = w_pseudo.T @NULL_R
+    time_sol = np.arange(w_sol.shape[1]) * 0.1
+
+    plt.figure()
+    plt.plot(time_sol, w_null_sol)
+    plt.plot(time_sol, w_pseudo_sol)
+    for i in range(NUM_WHEELS):
+        plt.fill_between(time_sol, band_bottom[i], band_top[i], alpha=0.2)
+    for i, layer in enumerate(new_layers):
+        nodes = node_list[i]
+        for node in nodes:
+            alpha_k = node
+            plt.scatter(time_sol[layer], alpha_k, color='red')
+
+    plt.show()
+
+
 if __name__ == "__main__":
 
     t0 = time.perf_counter()
@@ -533,6 +555,7 @@ if __name__ == "__main__":
     free, not_crossing, crossing = generate_all_intervals(overlap_mask_sorted, band_pairs_mask_sorted, band_center)
     t3 = time.perf_counter()
     selected_layers = [0, 8004]
+    # selected_layers = np.arange(0, 8005, 10).tolist()
     print(free)
     print(not_crossing)
     print(crossing)
@@ -584,5 +607,10 @@ if __name__ == "__main__":
     print(f"Make path constraints: {t11 - t10:.4f} s")
     print(f"Make torque constraints: {t12 - t11:.4f} s")
     print(f"Final integration time: {t13 - t12:.4f} s")
+
+    print("OMEGA START:", OMEGA_START.flatten())
+    print("OMEGA_START_PSEUDO:", OMEGA_START_PSEUDO.flatten())
+    print("OMEGA_START_NULL:", OMEGA_START_NULL.flatten())
+    plot()
 
 

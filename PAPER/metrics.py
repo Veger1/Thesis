@@ -11,23 +11,23 @@ def time_stiction_accurate(omega, limit, dt=0.1):
 
     for j in range(4):
         for i in range(N - 1):
-            if abs(omega[i, j]) < omega_max or abs(omega[i + 1, j]) < omega_max:
-                if abs(omega[i, j]) < omega_max and abs(omega[i + 1, j]) < omega_max:
+            if abs(omega[j, i]) < omega_max or abs(omega[j, i+1]) < omega_max:
+                if abs(omega[j, i]) < omega_max and abs(omega[j, i+1]) < omega_max:
                     stiction_time[j] += dt
                 else:
-                    if abs(omega[i, j]) < omega_max:
-                        if omega[i+1, j] > omega_max:
+                    if abs(omega[j, i]) < omega_max:
+                        if omega[j, i+1] > omega_max:
                             crossing_value = omega_max
                         else:
                             crossing_value = omega_min
                     else:
-                        if omega[i, j] > omega_max:
+                        if omega[j, i] > omega_max:
                             crossing_value = omega_max
                         else:
                             crossing_value = omega_min
 
                     # ✅ Insert safe interpolation here ↓
-                    w0, w1 = omega[i, j], omega[i + 1, j]
+                    w0, w1 = omega[j, i], omega[j, i + 1]
                     t0, t1 = time[i], time[i + 1]
                     eps = 1e-12
 
@@ -40,7 +40,7 @@ def time_stiction_accurate(omega, limit, dt=0.1):
                     # interpolator = interp1d([omega[i, j], omega[i+1, j]], [time[i], time[i + 1]])
                     # crossing_time = interpolator(crossing_value)
 
-                    if abs(omega[i, j]) < omega_max:
+                    if abs(omega[j, i]) < omega_max:
                         # omega[i] is inside, add time from time[i] to crossing
                         stiction_time[j] += crossing_time - time[i]
                     else:
@@ -58,7 +58,7 @@ def energy(omega, torque, dt=0.1):
     :return: numpy array of shape (4,), energy value for each band.
     """
     # Element-wise power calculation
-    power = omega * torque * dt
+    power = omega[:, :-1] * torque * dt
 
     # Only consider positive power contributions
     positive_power = np.maximum(power, 0)
