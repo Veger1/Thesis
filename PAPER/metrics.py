@@ -6,6 +6,7 @@ def time_stiction_accurate(omega, limit, dt=0.1):
     time = np.linspace(0, N * dt, N)  # Assuming 0.1s intervals
     stiction_time = np.zeros(4)
 
+    limit *= 0.99
     omega_max = limit
     omega_min = -limit
 
