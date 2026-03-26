@@ -1,3 +1,16 @@
 Width of stiction bands can depend on time, phase of the maneuver. Depending on how much margin is needed.
 
 Charactize solution along nullspace and orthogonal dimension. Do solutions exist for nullspace component larger than x?
+
+The maximum size of this set is defined by the number of nullspace dimensions.
+
+Ideas to mention:
+- Crossing can be forbidden between certain layers (large cost)
+- More accurate w^2 estimation can be done, advantage is small IMO
+- Set size formulas
+
+
+Tips:
+- Always State the Design Choice Without Apologizing
+- Replace Explanations With Structural Sentences
+- Remove “why” From Implementation (results will show the benefit)

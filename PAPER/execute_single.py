@@ -1,6 +1,6 @@
 from algorithm import *
 from metrics import *
-import pickle
+import pandas as pd
 from tabulate import tabulate
 
 def safe_run(w_start, k_given):
@@ -138,53 +138,35 @@ def run_and_evaluate(sims=1, k_given=10):
     np.random.seed(1)
     for i in range(sims):  # Adjust the range for the desired number of runs
         OMEGA_START = np.random.uniform(-300, 300, (4, 1))
-        print("omega_start:", OMEGA_START.flatten())
+        # print("omega_start:", OMEGA_START.flatten())
         timing_safe, result_safe, layers_safe = safe_run(OMEGA_START, k_given=k_given)
         if timing_safe is not None:
             metrics_safe = evaluate(result_safe, layers_safe)
         else:
             metrics_safe = None
 
-        timing_minmax, result_minmax, layers_minmax = run_minmax(OMEGA_START)
-        metrics_minmax = evaluate(result_minmax, layers_minmax)
+        # timing_minmax, result_minmax, layers_minmax = run_minmax(OMEGA_START)
+        # metrics_minmax = evaluate(result_minmax, layers_minmax)
 
-        timing_pseudo, result_pseudo, layers_pseudo = run_pseudo(OMEGA_START)
-        metrics_pseudo = evaluate(result_pseudo, layers_pseudo)
+        # timing_pseudo, result_pseudo, layers_pseudo = run_pseudo(OMEGA_START)
+        # metrics_pseudo = evaluate(result_pseudo, layers_pseudo)
 
-        result_dict = {
-            "OMEGA_START": OMEGA_START.flatten().tolist(),
-            "safe_run": {"timing": timing_safe, "metrics": metrics_safe},
-            "run_minmax": {"timing": timing_minmax, "metrics": metrics_minmax},
-            "run_pseudo": {"timing": timing_pseudo, "metrics": metrics_pseudo},
-        }
-        # # Tabulate and print results for the current simulation
-        # headers = ["Method", "Stiction Time", "Energy", "Zero Crossing", "Omega Squared", "Number of Layers",
-        #            "Total Time"]
-        # rows = []
-        # for method in ["safe_run", "run_minmax", "run_pseudo"]:
-        #     if result_dict[method]["timing"] is not None:
-        #         metrics = result_dict[method]["metrics"]
-        #         timing = result_dict[method]["timing"]
-        #         rows.append([
-        #             method,
-        #             metrics["stiction_time"],
-        #             metrics["energy"],
-        #             metrics["zero_crossing"],
-        #             metrics["omega_squared"],
-        #             metrics["number_of_layers"],
-        #             timing["total_time"]
-        #         ])
-        # print(f"Simulation {i + 1}/{sims} results:")
-        # print(tabulate(rows, headers=headers, floatfmt=".4f"))
-        # print()
+        method, metrics, timings = "graph_10000000", metrics_safe, timing_safe
 
-        results.append(result_dict)
+        results.append({
+            "Iteration": i,
+            "Omega Start": OMEGA_START.flatten(),
+            "Stiction Time": metrics["stiction_time"],
+            "Energy": metrics["energy"],
+            "Zero Crossings": metrics["zero_crossing"],
+            "Omega² Avg": metrics["omega_squared"],
+            "Number of Layers": metrics["number_of_layers"],
+            "Timing": timings
+        })
 
-    # Save results to a file
-    with open("simulation_results.pkl", "wb") as f:
-        pickle.dump(results, f)
-
-    print("All simulations completed. Results saved to 'simulation_results.pkl'.")
+    results_df = pd.DataFrame(results)
+    results_df.to_excel("simulation_results.xlsx", index=False)
+    print("All simulations completed. Results saved to 'simulation_results.xlsx'.")
 
 
-run_and_evaluate(sims=50, k_given=0)
+run_and_evaluate(sims=50, k_given=1000)

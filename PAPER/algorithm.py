@@ -27,6 +27,7 @@ RPM_MIN = 100
 
 OMEGA_MAX = RPM_MAX * 2 * np.pi / 60
 OMEGA_MIN = RPM_MIN * 2 * np.pi / 60
+np.random.seed(23)
 OMEGA_START = np.random.uniform(-300, 300, (4, 1))
 
 MAX_TORQUE = 2.5 * 10**-3  # Torque maximum in Nm
@@ -67,59 +68,45 @@ def make_direct_overlap_masks(w_data:np.ndarray):
     return overlap_sorted, band_pairs_sorted, order, center, radii
 
 def generate_intervals(overlap_k, pair_k, center):
-    """
-    CAN BE ACCELERATED WITH VECTOR MATH, LOOK FOR BOUNDARIES WITH DIFFS
-    overlap_k : (N,) boolean
-    pair_k    : (2, N) band indices (i,j) per time
-    center    : (4, N)
-
-    Returns:
-        free_intervals
-        overlap_not_crossing
-        overlap_crossing
-    """
-
-    free_intervals = []
-    overlap_not_crossing = []
-    overlap_crossing = []
 
     N = overlap_k.size
-    start = 0
-    current = overlap_k[0]
 
-    for t in range(1, N):
-        if overlap_k[t] != current:
-            end = t - 1
+    # --- 1) Find interval boundaries ---
+    change_idx = np.where(np.diff(overlap_k.astype(int)) != 0)[0] + 1
 
-            if current:  # overlap interval
-                i, j = pair_k[:, start]
+    starts = np.concatenate(([0], change_idx))
+    ends   = np.concatenate((change_idx - 1, [N - 1]))
 
-                s0 = np.sign(center[i, start] - center[j, start])
-                s1 = np.sign(center[i, end]   - center[j, end])
+    interval_type = overlap_k[starts]  # True = overlap, False = free
 
-                if s0 == s1:
-                    overlap_not_crossing.append((start, end))
-                else:
-                    overlap_crossing.append((start, end))
-            else:  # free interval
-                free_intervals.append((start, end))
+    # --- 2) Separate free vs overlap intervals ---
+    free_mask = ~interval_type
+    overlap_mask = interval_type
 
-            start = t
-            current = overlap_k[t]
+    free_intervals = list(zip(starts[free_mask], ends[free_mask]))
 
-    # Handle final interval
-    end = N - 1
-    if current:
-        i, j = pair_k[:, start]
-        s0 = np.sign(center[i, start] - center[j, start])
-        s1 = np.sign(center[i, end]   - center[j, end])
+    # --- 3) Process overlap intervals vectorized ---
+    overlap_starts = starts[overlap_mask]
+    overlap_ends   = ends[overlap_mask]
 
-        if s0 == s1:
-            overlap_not_crossing.append((start, end))
-        else:
-            overlap_crossing.append((start, end))
-    else:
-        free_intervals.append((start, end))
+    if len(overlap_starts) == 0:
+        return free_intervals, [], []
+
+    # get band indices at start
+    i = pair_k[0, overlap_starts]
+    j = pair_k[1, overlap_starts]
+
+    # compute signs at start and end
+    s0 = np.sign(center[i, overlap_starts] - center[j, overlap_starts])
+    s1 = np.sign(center[i, overlap_ends]   - center[j, overlap_ends])
+
+    same_sign = s0 == s1
+
+    overlap_not_crossing = list(zip(overlap_starts[same_sign],
+                                    overlap_ends[same_sign]))
+
+    overlap_crossing = list(zip(overlap_starts[~same_sign],
+                                overlap_ends[~same_sign]))
 
     return free_intervals, overlap_not_crossing, overlap_crossing
 
@@ -303,6 +290,7 @@ def build_graph(
     nodes_per_layer: List[List[float]],
     signs_per_layer: List[List[np.ndarray]],
     K: float,
+    layer_list: List[int],
     restricted_intervals: List[Tuple[int, int]]
 ) -> nx.DiGraph:
     """
@@ -334,8 +322,9 @@ def build_graph(
                 sign2 = signs_per_layer[layer_idx + 1][j]
                 zero_crossings = np.sum(sign1 != sign2)
 
+                edge_length = layer_list[layer_idx + 1] - layer_list[layer_idx]
                 # Composite cost
-                cost = K * zero_crossings + alpha_k2**2
+                cost = K * zero_crossings + edge_length*alpha_k2**2
 
                 # Check if the edge is restricted
                 if (layer_idx, layer_idx + 1) in restricted_intervals and zero_crossings > 0:
@@ -544,6 +533,194 @@ def plot():
 
     plt.show()
 
+def plot_input():
+    plt.rcParams.update({
+        "font.size": 8,
+        "axes.labelsize": 8,
+        "axes.titlesize": 8,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "legend.fontsize": 7,
+        "lines.linewidth": 0.8,
+    })
+    fig, axs = plt.subplots(3, 1, sharex=True, figsize=(3.25, 3))
+    time_vec = np.arange(data.shape[1]) * 0.1
+    axs[0].plot(time_vec, data.T[:, 0])
+    axs[1].plot(time_vec, data.T[:,1])
+    axs[2].plot(time_vec, data.T[:,2])
+    axs[0].ticklabel_format(axis='y', style='sci', scilimits=(0,0))
+    axs[1].ticklabel_format(axis='y', style='sci', scilimits=(0,0))
+    axs[2].ticklabel_format(axis='y', style='sci', scilimits=(0,0))
+    axs[2].set_xlabel("Time (s)")
+    axs[1].set_ylabel("Torque (Nm)")
+    axs[0].grid(True, linewidth=0.4, alpha= 0.5)
+    axs[1].grid(True, linewidth=0.4, alpha= 0.5)
+    axs[2].grid(True, linewidth=0.4, alpha= 0.5)
+    axs[0].text(time_vec[50], 0.0006, "X")
+    axs[1].text(time_vec[50], 0.0006, "Y")
+    axs[2].text(time_vec[50], 0.0006, "Z")
+    plt.xticks([0, 200, 400, 600, 800])
+    plt.tight_layout()
+    plt.show()
+
+def plot_input_together():
+    plt.rcParams.update({
+        "font.size": 8,
+        "axes.labelsize": 8,
+        "axes.titlesize": 8,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "legend.fontsize": 7,
+        "lines.linewidth": 0.8,
+    })
+    plt.figure(figsize=(3.25,3))
+    time_vec = np.arange(data.shape[1]) * 0.1
+    # axs[0].plot(time_vec, data.T[:, 0])
+    # axs[1].plot(time_vec, data.T[:, 1])
+    # axs[2].plot(time_vec, data.T[:, 2])
+    # axs[0].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
+    # axs[1].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
+    # axs[2].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
+    # axs[2].set_xlabel("Time (s)")
+    # axs[1].set_ylabel("Torque (Nm)")
+    # axs[0].grid(True, linewidth=0.4, alpha=0.5)
+    # axs[1].grid(True, linewidth=0.4, alpha=0.5)
+    # axs[2].grid(True, linewidth=0.4, alpha=0.5)
+    # axs[0].text(time_vec[50], 0.0006, "X")
+    # axs[1].text(time_vec[50], 0.0006, "Y")
+    # axs[2].text(time_vec[50], 0.0006, "Z")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Torque (Nm)")
+    plt.plot(time_vec, data.T)
+    plt.ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
+    plt.grid(True, linewidth=0.4, alpha=0.5)
+    plt.legend(["X", "Y", "Z"], loc='upper right')
+    plt.xticks([0, 200, 400, 600, 800])
+    plt.tight_layout()
+    plt.show()
+
+def plot_nullspace():
+    plt.rcParams.update({
+        "font.size": 8,
+        "axes.labelsize": 8,
+        "axes.titlesize": 8,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "legend.fontsize": 7,
+        "lines.linewidth": 0.8,
+    })
+    plt.figure(figsize=(3.25, 2.6))
+
+    band_top = band_center + band_radii
+    band_bottom = band_center - band_radii
+    time_vec = np.arange(w_sol.shape[1]) * 0.1
+
+    # plt.fill_between(time_vec, band_bottom[0], band_top[0], hatch='////')
+    # plt.fill_between(time_vec, band_bottom[1], band_top[1], hatch='xxxx')
+    # plt.fill_between(time_vec, band_bottom[2], band_top[2], hatch='\\\\')
+    # plt.fill_between(time_vec, band_bottom[3], band_top[3], hatch='++++')
+    plt.fill_between(time_vec, band_bottom[0], band_top[0], linestyle='-', alpha=0.7)
+    plt.fill_between(time_vec, band_bottom[1], band_top[1], linestyle='--', alpha=0.7)
+    plt.fill_between(time_vec, band_bottom[2], band_top[2], linestyle='-.', alpha=0.7)
+    plt.fill_between(time_vec, band_bottom[3], band_top[3], linestyle=':', alpha=0.7)
+    if True:
+        for i, layer in enumerate(new_layers):
+            nodes = node_list[i]
+            for node in nodes:
+                alpha_k = node
+                plt.scatter(time_vec[layer], alpha_k, color='red', s=2)
+
+    plt.xticks([0, 200, 400, 600, 800])
+    plt.xlabel("Time (s)")
+    plt.tight_layout()
+    plt.show()
+
+def plot_nullspace_connections():
+    plt.rcParams.update({
+        "font.size": 8,
+        "axes.labelsize": 8,
+        "axes.titlesize": 8,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "legend.fontsize": 7,
+        "lines.linewidth": 0.8,
+    })
+    plt.figure(figsize=(3.25, 2.6))
+
+    time_vec = np.arange(w_sol.shape[1]) * 0.1
+
+    # First, scatter all nodes layer by layer
+    for i, layer in enumerate(new_layers):
+        nodes = node_list[i]
+        for node in nodes:
+            plt.scatter(time_vec[layer], node, color='red', s=2)
+
+    # Now draw lines between consecutive layers
+    for i in range(len(new_layers) - 1):
+        layer1 = new_layers[i]
+        layer2 = new_layers[i + 1]
+        nodes1 = node_list[i]
+        nodes2 = node_list[i + 1]
+
+
+        for n1 in nodes1:
+            for n2 in nodes2:
+                time_list = [time_vec[layer1], time_vec[layer2]]
+                y1 = float(n1) if isinstance(n1, (list, np.ndarray)) else n1
+                y2 = float(n2) if isinstance(n2, (list, np.ndarray)) else n2
+                plt.plot(time_list, [y1, y2], color='blue', linewidth=0.5, alpha=0.6)
+
+    # Keep same x and y limits as original figure
+    band_top = band_center + band_radii
+    band_bottom = band_center - band_radii
+    # plt.xlim(0, w_sol.shape[1]*0.1)
+    plt.ylim(band_bottom.min(), band_top.max())
+
+    plt.xticks([0, 200, 400, 600, 800])
+    plt.xlabel("Time (s)")
+    plt.tight_layout()
+    plt.show()
+
+def plot_intervals():
+    plt.rcParams.update({
+        "font.size": 8,
+        "axes.labelsize": 8,
+        "axes.titlesize": 8,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "legend.fontsize": 7,
+        "lines.linewidth": 0.8,
+    })
+    plt.figure(figsize=(3.25, 1.6))
+    intervals = free
+    y_spacing = 1
+    plt.hlines(-1, 0, 8004, linestyles='-')
+    plt.hlines(3, 0, 8004, linestyles='-')
+    plt.plot([0, 8004], [-1, -1], marker='o', color='blue', markersize=2)
+    plt.plot([0, 8004], [3, 3], marker='o', color='blue', markersize=2)
+    for i, row in enumerate(intervals):
+        y = i * y_spacing
+        for row_num, line in enumerate(row):
+            x1, x2 = line
+            if row_num%2 == 0:
+                plt.hlines(y, x1, x2, linestyles='-')
+                print("1")
+            else:
+                plt.hlines(y, x1, x2, linestyle='-.')
+                print("2")
+            plt.plot([x1, x2], [y, y], marker='o', color='blue', markersize=2)
+    for layer in new_layers:
+        if layer in selected_layers:
+            plt.axvline(x=layer, color='red', linestyle='-', alpha=0.7)
+        else:
+            plt.axvline(x=layer, color='red', linestyle='--', alpha=0.7)
+    plt.xlabel("Time (s)")
+    plt.yticks([])
+    plt.grid(True, linewidth=0.4, alpha=0.5)
+    plt.tight_layout()
+    plt.show()
+
+
 
 if __name__ == "__main__":
 
@@ -555,6 +732,7 @@ if __name__ == "__main__":
     free, not_crossing, crossing = generate_all_intervals(overlap_mask_sorted, band_pairs_mask_sorted, band_center)
     t3 = time.perf_counter()
     selected_layers = [0, 8004]
+    selected_layers = [0, 689, 2003, 2690, 4004, 5100, 6005, 7101, 8004]
     # selected_layers = np.arange(0, 8005, 10).tolist()
     print(free)
     print(not_crossing)
@@ -575,9 +753,9 @@ if __name__ == "__main__":
     t8 = time.perf_counter()
 
 
-    K=10
+    K=1000000
     restricted_intervals = []
-    G = build_graph(node_list, sign_list, K, restricted_intervals)
+    G = build_graph(node_list, sign_list, K, new_layers, restricted_intervals)
     t9 = time.perf_counter()
 
     # Solve the graph
@@ -611,6 +789,12 @@ if __name__ == "__main__":
     print("OMEGA START:", OMEGA_START.flatten())
     print("OMEGA_START_PSEUDO:", OMEGA_START_PSEUDO.flatten())
     print("OMEGA_START_NULL:", OMEGA_START_NULL.flatten())
-    plot()
 
-
+    from metrics import time_stiction_accurate
+    stic_time = time_stiction_accurate(w_sol, OMEGA_MIN, dt=0.1)
+    print(sum(stic_time))
+    # plot()
+    # plot_input_together()
+    # plot_nullspace()
+    plot_intervals()
+    # plot_nullspace_connections()
