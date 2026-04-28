@@ -6,6 +6,7 @@ from heapq import heappush, heappop
 from typing import List, Tuple
 import time
 import networkx as nx
+from sympy.printing.pretty.pretty_symbology import line_width
 
 NUM_WHEELS = 4
 IRW = 0.00002392195
@@ -27,8 +28,9 @@ RPM_MIN = 100
 
 OMEGA_MAX = RPM_MAX * 2 * np.pi / 60
 OMEGA_MIN = RPM_MIN * 2 * np.pi / 60
-np.random.seed(23)
+np.random.seed(2) # SEED IS 23, 46, 2
 OMEGA_START = np.random.uniform(-300, 300, (4, 1))
+# OMEGA_START = np.array([[-61.93951546], [23.2900404], [-48.48329136], [111.13170024]])
 
 MAX_TORQUE = 2.5 * 10**-3  # Torque maximum in Nm
 
@@ -66,6 +68,33 @@ def make_direct_overlap_masks(w_data:np.ndarray):
     )  # (3, 2, N) Recover which original bands formed each intersection
 
     return overlap_sorted, band_pairs_sorted, order, center, radii
+
+def calc_saturation_limit(w_data: np.ndarray):
+    # Compute both candidate bounds
+    a_upper = ( OMEGA_MAX - w_data) / NULL_R   # from +omega_max
+    a_lower = (-OMEGA_MAX - w_data) / NULL_R   # from -omega_max
+
+    # Get interval per wheel (handle sign automatically)
+    lower = np.minimum(a_upper, a_lower)
+    upper = np.maximum(a_upper, a_lower)
+
+    # Track origin per wheel
+    lower_from_upper = a_upper < a_lower   # True → came from +omega_max
+    upper_from_upper = a_upper > a_lower   # True → came from +omega_max
+
+    # Global bounds
+    alpha_min = np.max(lower, axis=0)
+    alpha_max = np.min(upper, axis=0)
+
+    # Identify which wheel is active
+    idx_min = np.argmax(lower, axis=0)
+    idx_max = np.argmin(upper, axis=0)
+
+    # Extract origin of active constraint
+    alpha_min_from_upper = lower_from_upper[idx_min, np.arange(w_data.shape[1])]
+    alpha_max_from_upper = upper_from_upper[idx_max, np.arange(w_data.shape[1])]
+
+    return alpha_min, alpha_max, idx_min, idx_max, alpha_min_from_upper, alpha_max_from_upper
 
 def generate_intervals(overlap_k, pair_k, center):
 
@@ -538,8 +567,8 @@ def plot_input():
         "font.size": 8,
         "axes.labelsize": 8,
         "axes.titlesize": 8,
-        "xtick.labelsize": 8,
-        "ytick.labelsize": 8,
+        "xtick.labelsize": 6,
+        "ytick.labelsize": 6,
         "legend.fontsize": 7,
         "lines.linewidth": 0.8,
     })
@@ -568,8 +597,8 @@ def plot_input_together():
         "font.size": 8,
         "axes.labelsize": 8,
         "axes.titlesize": 8,
-        "xtick.labelsize": 8,
-        "ytick.labelsize": 8,
+        "xtick.labelsize": 6,
+        "ytick.labelsize": 6,
         "legend.fontsize": 7,
         "lines.linewidth": 0.8,
     })
@@ -595,7 +624,8 @@ def plot_input_together():
     plt.ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
     plt.grid(True, linewidth=0.4, alpha=0.5)
     plt.legend(["X", "Y", "Z"], loc='upper right')
-    plt.xticks([0, 200, 400, 600, 800])
+    plt.xlim([0, 800])
+    plt.xticks([0, 100, 200, 300, 400, 500, 600, 700, 800])
     plt.tight_layout()
     plt.show()
 
@@ -604,8 +634,8 @@ def plot_nullspace():
         "font.size": 8,
         "axes.labelsize": 8,
         "axes.titlesize": 8,
-        "xtick.labelsize": 8,
-        "ytick.labelsize": 8,
+        "xtick.labelsize": 6,
+        "ytick.labelsize": 6,
         "legend.fontsize": 7,
         "lines.linewidth": 0.8,
     })
@@ -615,15 +645,38 @@ def plot_nullspace():
     band_bottom = band_center - band_radii
     time_vec = np.arange(w_sol.shape[1]) * 0.1
 
-    # plt.fill_between(time_vec, band_bottom[0], band_top[0], hatch='////')
-    # plt.fill_between(time_vec, band_bottom[1], band_top[1], hatch='xxxx')
-    # plt.fill_between(time_vec, band_bottom[2], band_top[2], hatch='\\\\')
-    # plt.fill_between(time_vec, band_bottom[3], band_top[3], hatch='++++')
+    alpha_min, alpha_max, idx_min, idx_max, alpha_min_from_upper, alpha_max_from_upper = calc_saturation_limit(w_pseudo)
+    # ---- Colors per wheel ----
+    cmap = plt.get_cmap('tab10')
+    n_wheels = band_top.shape[0]
+    wheel_colors = [cmap(i) for i in range(n_wheels)]
+
+    def plot_segmented(t, y, wheel_idx, from_upper, is_min):
+        for w in range(n_wheels):
+            for origin_flag, linestyle in zip([True, False], ['-', '--']):
+                mask = (wheel_idx == w) & (from_upper == origin_flag)
+                idx = np.where(mask)[0]
+                if len(idx) == 0:
+                    continue
+
+                splits = np.split(idx, np.where(np.diff(idx) != 1)[0] + 1)
+
+                for seg in splits:
+                    plt.plot(t[seg], y[seg],
+                             color=wheel_colors[w],
+                             linestyle=linestyle)
+
     plt.fill_between(time_vec, band_bottom[0], band_top[0], linestyle='-', alpha=0.7)
     plt.fill_between(time_vec, band_bottom[1], band_top[1], linestyle='--', alpha=0.7)
     plt.fill_between(time_vec, band_bottom[2], band_top[2], linestyle='-.', alpha=0.7)
     plt.fill_between(time_vec, band_bottom[3], band_top[3], linestyle=':', alpha=0.7)
-    if True:
+    plt.plot(time_vec, alpha_min, color='black', linestyle='--')
+    plt.plot(time_vec, alpha_max, color='black', linestyle='--')
+    # plt.plot(time_vec, path_constraint, color='black', linestyle='-')
+    # plot_segmented(time_vec, alpha_min, idx_min, alpha_min_from_upper, is_min=True)
+    # plot_segmented(time_vec, alpha_max, idx_max, alpha_max_from_upper, is_min=False)
+
+    if False:
         for i, layer in enumerate(new_layers):
             nodes = node_list[i]
             for node in nodes:
@@ -631,7 +684,96 @@ def plot_nullspace():
                 plt.scatter(time_vec[layer], alpha_k, color='red', s=2)
 
     plt.xticks([0, 200, 400, 600, 800])
+    plt.xlim(0,800)
     plt.xlabel("Time (s)")
+    plt.ylabel(r"Nullspace coordinate ($\alpha_H$)")
+    # plt.title("Disallowed nullspace coordinate over time")
+    plt.grid(alpha=0.5)
+    plt.xticks([0, 100, 200, 300, 400, 500, 600, 700, 800])
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_nullspace_feasible():
+    plt.rcParams.update({
+        "font.size": 8,
+        "axes.labelsize": 8,
+        "axes.titlesize": 8,
+        "xtick.labelsize": 6,
+        "ytick.labelsize": 6,
+        "legend.fontsize": 7,
+        "lines.linewidth": 0.8,
+    })
+    plt.figure(figsize=(3.25, 2.6))
+
+    time_vec = np.arange(w_sol.shape[1]) * 0.1
+
+    # Get band structure
+    overlap, band_pairs, order, center, radii = make_direct_overlap_masks(w_pseudo)
+
+    center_sorted = np.take_along_axis(center, order, axis=0)
+    radii_sorted = np.take_along_axis(radii, order, axis=0)
+
+    band_top = center_sorted + radii_sorted
+    band_bottom = center_sorted - radii_sorted
+
+    # Get alpha bounds
+    alpha_min, alpha_max, *_ = calc_saturation_limit(w_pseudo)
+
+    # Stack all boundaries
+    boundaries = np.vstack([
+        alpha_max,
+        band_top[::-1],
+        band_bottom[::-1],
+        alpha_min
+    ])  # shape: (2*bands + 2, N)
+
+    # Sort boundaries vertically at each time
+    boundaries_sorted = np.sort(boundaries, axis=0)[::-1]
+
+    # ---- Define region colors (fixed per layer index) ----
+    cmap = plt.get_cmap('viridis')
+    n_regions = boundaries.shape[0] - 1
+    region_colors = [cmap(i / (n_regions - 1)) for i in range(n_regions)]
+
+    # ---- Fill regions ----
+    for i in range(boundaries_sorted.shape[0] - 1):
+        # top = boundaries_sorted[i]
+        # bottom = boundaries_sorted[i + 1]
+        top = np.minimum(boundaries_sorted[i], alpha_max)
+        bottom = np.maximum(boundaries_sorted[i + 1], alpha_min)
+
+        # Only fill if region is non-zero thickness
+        valid = (top - bottom) > 1e-6
+
+        if not np.any(valid):
+            continue
+
+        # Segment contiguous valid regions
+        idx = np.where(valid)[0]
+        splits = np.split(idx, np.where(np.diff(idx) != 1)[0] + 1)
+
+        for seg in splits:
+            plt.fill_between(time_vec[seg],
+                             bottom[seg],
+                             top[seg],
+                             color=region_colors[i],
+                             alpha=0.6,
+                             edgecolor='none',
+                             linewidth=0)
+
+    plt.fill_between(time_vec, band_bottom[0], band_top[0], alpha=1, color="white")
+    plt.fill_between(time_vec, band_bottom[1], band_top[1], alpha=1, color="white")
+    plt.fill_between(time_vec, band_bottom[2], band_top[2], alpha=1, color="white")
+    plt.fill_between(time_vec, band_bottom[3], band_top[3], alpha=1, color="white")
+    plt.plot(time_vec, alpha_min, color='black', linestyle='--')
+    plt.plot(time_vec, alpha_max, color='black', linestyle='--')
+    # ---- Formatting ----
+    plt.xlim(0, 800)
+    plt.xlabel("Time (s)")
+    plt.ylabel(r"Nullspace coordinate ($\alpha_H$)")
+    plt.grid(alpha=0.5)
+    plt.xticks([0, 100, 200, 300, 400, 500, 600, 700, 800])
     plt.tight_layout()
     plt.show()
 
@@ -668,7 +810,8 @@ def plot_nullspace_connections():
                 time_list = [time_vec[layer1], time_vec[layer2]]
                 y1 = float(n1) if isinstance(n1, (list, np.ndarray)) else n1
                 y2 = float(n2) if isinstance(n2, (list, np.ndarray)) else n2
-                plt.plot(time_list, [y1, y2], color='blue', linewidth=0.5, alpha=0.6)
+                plt.plot(time_list, [y1, y2], color='black', linewidth=0.5, alpha=0.6)
+
 
     # Keep same x and y limits as original figure
     band_top = band_center + band_radii
@@ -676,7 +819,7 @@ def plot_nullspace_connections():
     # plt.xlim(0, w_sol.shape[1]*0.1)
     plt.ylim(band_bottom.min(), band_top.max())
 
-    plt.xticks([0, 200, 400, 600, 800])
+    plt.xticks([0, 100, 200, 300, 400, 500, 600, 700, 800])
     plt.xlabel("Time (s)")
     plt.tight_layout()
     plt.show()
@@ -686,41 +829,58 @@ def plot_intervals():
         "font.size": 8,
         "axes.labelsize": 8,
         "axes.titlesize": 8,
-        "xtick.labelsize": 8,
-        "ytick.labelsize": 8,
+        "xtick.labelsize": 6,
+        "ytick.labelsize": 6,
         "legend.fontsize": 7,
         "lines.linewidth": 0.8,
     })
+    cmap = plt.get_cmap('viridis')
+    n_lines = 5
+    colors = [cmap(i / (n_lines - 1)) for i in range(n_lines)]
     plt.figure(figsize=(3.25, 1.6))
     intervals = free
     y_spacing = 1
-    plt.hlines(-1, 0, 8004, linestyles='-')
-    plt.hlines(3, 0, 8004, linestyles='-')
-    plt.plot([0, 8004], [-1, -1], marker='o', color='blue', markersize=2)
-    plt.plot([0, 8004], [3, 3], marker='o', color='blue', markersize=2)
+    # plt.hlines(-1, 0, 8004/10, linestyles='-')
+    # plt.hlines(3, 0, 8004/10, linestyles='-')
+    plt.plot([0, 4237/10], [3, 3], linewidth=1.5, marker='o', color=colors[0], markersize=2)
+    plt.plot([6138/10, 8004/10], [3, 3], linewidth=1.5, marker='o', color=colors[0], markersize=2)
+    plt.plot([0, 4243/10], [-1, -1], linewidth=1.5, marker='o', color=colors[4], markersize=2)
+    plt.plot([6115/10, 8004/10], [-1, -1], linewidth=1.5, marker='o', color=colors[4], markersize=2)
     for i, row in enumerate(intervals):
         y = i * y_spacing
+        line_color = colors[i+1]
         for row_num, line in enumerate(row):
             x1, x2 = line
             if row_num%2 == 0:
-                plt.hlines(y, x1, x2, linestyles='-')
-                print("1")
+                plt.hlines(y, x1/10, x2/10, linewidth=1.5, linestyles='-', color=line_color)
             else:
-                plt.hlines(y, x1, x2, linestyle='-.')
-                print("2")
-            plt.plot([x1, x2], [y, y], marker='o', color='blue', markersize=2)
+                plt.hlines(y, x1/10, x2/10, linewidth=1.5, linestyle='-')
+            plt.plot([x1/10, x2/10], [y, y], marker='o', color=line_color, markersize=2)
     for layer in new_layers:
         if layer in selected_layers:
-            plt.axvline(x=layer, color='red', linestyle='-', alpha=0.7)
+            plt.axvline(x=layer/10, color='black', linestyle='-', alpha=0.7)
         else:
-            plt.axvline(x=layer, color='red', linestyle='--', alpha=0.7)
+            plt.axvline(x=layer/10, color='black', linestyle='--', alpha=0.7)
     plt.xlabel("Time (s)")
+    plt.xlim([0, 8004/10])
     plt.yticks([])
     plt.grid(True, linewidth=0.4, alpha=0.5)
     plt.tight_layout()
     plt.show()
 
 
+def save_all(filename="results.npz"):
+    np.savez(filename,
+             w_sol=w_sol,
+             alpha_sol=alpha_sol,
+             torque_sol=torque_sol,
+             path_constraint=path_constraint,
+             torque_constraint=torque_constraint,
+             w_pseudo=w_pseudo,
+             band_center=band_center,
+             band_radii=band_radii,
+             new_layers=new_layers,
+    )
 
 if __name__ == "__main__":
 
@@ -753,7 +913,7 @@ if __name__ == "__main__":
     t8 = time.perf_counter()
 
 
-    K=1000000
+    K=100000000
     restricted_intervals = []
     G = build_graph(node_list, sign_list, K, new_layers, restricted_intervals)
     t9 = time.perf_counter()
@@ -794,7 +954,9 @@ if __name__ == "__main__":
     stic_time = time_stiction_accurate(w_sol, OMEGA_MIN, dt=0.1)
     print(sum(stic_time))
     # plot()
-    # plot_input_together()
-    # plot_nullspace()
+    plot_input_together()
+    # save_all("8.npz")
+    plot_nullspace()
+    plot_nullspace_feasible()
     plot_intervals()
-    # plot_nullspace_connections()
+    plot_nullspace_connections()
