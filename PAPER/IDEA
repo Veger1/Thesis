@@ -14,3 +14,12 @@ Tips:
 - Always State the Design Choice Without Apologizing
 - Replace Explanations With Structural Sentences
 - Remove “why” From Implementation (results will show the benefit)
+
+
+Extra discussion:
+ - Expected vs actual zero-crossings
+ - Worst case vs typical case behavior for number of nodes/edges
+ - sensitivity analysis
+    - initial wheel speed
+    - number of layers chosen
+    - cost weight K

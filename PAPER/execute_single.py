@@ -40,6 +40,8 @@ def safe_run(w_start, k_given):
         t8 = time.perf_counter()
         shortest_path = solve_graph(G, start_layer=0, end_layer=8004, omega_start_sign=np.sign(w_start.flatten()))
 
+        predicted_zero_crossings = get_zero_crossings_from_path(shortest_path, sign_list)
+
         t9 = time.perf_counter()
         path_constraint = calc_alpha_limits(band_center, band_radii, shortest_path, node_list, new_layers)
 
@@ -68,10 +70,23 @@ def safe_run(w_start, k_given):
 
         result_run = (w_sol, alpha_sol, torque_sol)
         print("Execution completed successfully. Timing:", timing["total_time"])
-        return timing, result_run, new_layers
+        return timing, result_run, new_layers, predicted_zero_crossings
     except Exception as e:
         print("An error occurred during execution:", str(e))
         return None
+
+def get_zero_crossings_from_path(path, signs_per_layer):
+    crossing_count = 0
+    for i in range(len(path)-1):
+        layer1, node1 = path[i]
+        layer2, node2 = path[i+1]
+        signs1 = signs_per_layer[layer1][node1]
+        signs2 = signs_per_layer[layer2][node2]
+        for s1, s2 in zip(signs1, signs2):
+            if s1 != s2:
+                crossing_count += 1
+    return crossing_count
+
 
 def evaluate(result_tuple, layers):
     w_sol, alpha_sol, torque_sol = result_tuple
@@ -139,7 +154,7 @@ def run_and_evaluate(sims=1, k_given=10):
     for i in range(sims):  # Adjust the range for the desired number of runs
         OMEGA_START = np.random.uniform(-300, 300, (4, 1))
         # print("omega_start:", OMEGA_START.flatten())
-        timing_safe, result_safe, layers_safe = safe_run(OMEGA_START, k_given=k_given)
+        timing_safe, result_safe, layers_safe, predicted_crossings = safe_run(OMEGA_START, k_given=k_given)
         if timing_safe is not None:
             metrics_safe = evaluate(result_safe, layers_safe)
         else:
@@ -159,6 +174,7 @@ def run_and_evaluate(sims=1, k_given=10):
             "Stiction Time": metrics["stiction_time"],
             "Energy": metrics["energy"],
             "Zero Crossings": metrics["zero_crossing"],
+            "Predicted Zero Crossings": predicted_crossings,
             "Omega² Avg": metrics["omega_squared"],
             "Number of Layers": metrics["number_of_layers"],
             "Timing": timings
@@ -169,4 +185,4 @@ def run_and_evaluate(sims=1, k_given=10):
     print("All simulations completed. Results saved to 'simulation_results.xlsx'.")
 
 
-run_and_evaluate(sims=50, k_given=1000)
+run_and_evaluate(sims=500, k_given=1)

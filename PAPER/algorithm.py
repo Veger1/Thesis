@@ -791,26 +791,41 @@ def plot_nullspace_connections():
 
     time_vec = np.arange(w_sol.shape[1]) * 0.1
 
+    shortest_nodes = set(shortest_path)
+    shortest_edges = set(zip(shortest_path, shortest_path[1:]))
+
     # First, scatter all nodes layer by layer
     for i, layer in enumerate(new_layers):
         nodes = node_list[i]
-        for node in nodes:
-            plt.scatter(time_vec[layer], node, color='red', s=2)
 
-    # Now draw lines between consecutive layers
+        for j, node in enumerate(nodes):
+            color = 'green' if (i, j) in shortest_nodes else 'black'
+            size = 3 if (i, j) in shortest_nodes else 2
+
+            plt.scatter(time_vec[layer], node, color=color, s=size)
+
     for i in range(len(new_layers) - 1):
         layer1 = new_layers[i]
         layer2 = new_layers[i + 1]
+
         nodes1 = node_list[i]
         nodes2 = node_list[i + 1]
 
+        for j1, n1 in enumerate(nodes1):
+            for j2, n2 in enumerate(nodes2):
+                edge = ((i, j1), (i + 1, j2))
 
-        for n1 in nodes1:
-            for n2 in nodes2:
-                time_list = [time_vec[layer1], time_vec[layer2]]
+                edge_color = 'green' if edge in shortest_edges else 'black'
+                linewidth = 1.5 if edge_color == 'green' else 0.5
+
                 y1 = float(n1) if isinstance(n1, (list, np.ndarray)) else n1
                 y2 = float(n2) if isinstance(n2, (list, np.ndarray)) else n2
-                plt.plot(time_list, [y1, y2], color='black', linewidth=0.5, alpha=0.6)
+
+                plt.plot([time_vec[layer1], time_vec[layer2]],
+                         [y1, y2],
+                         color=edge_color,
+                         linewidth=linewidth,
+                         alpha=0.6)
 
 
     # Keep same x and y limits as original figure
@@ -820,7 +835,10 @@ def plot_nullspace_connections():
     plt.ylim(band_bottom.min(), band_top.max())
 
     plt.xticks([0, 100, 200, 300, 400, 500, 600, 700, 800])
+    plt.xlim(0, 800)
     plt.xlabel("Time (s)")
+    plt.ylabel(r"Nullspace coordinate ($\alpha_H$)")
+    plt.grid(alpha=0.5)
     plt.tight_layout()
     plt.show()
 
